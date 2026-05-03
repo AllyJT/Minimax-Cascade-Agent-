@@ -99,7 +99,7 @@ class GameState:
         new = GameState()
         new.board = copy.deepcopy(self.board)
         new.turn_color = self.turn_color
-        new.turn_count = self._turn_count
+        new._turn_count = self._turn_count
         new.position_history = self.position_history.copy()
         return new
 
@@ -116,7 +116,7 @@ class GameState:
         )
         if red_tokens == 0 or blue_tokens == 0:
             return True
-        if self.turn_count >= 300:
+        if self._turn_count >= 300:
             return True
         return False
 

@@ -4,6 +4,7 @@ import copy
 from referee.game import PlayerColor,  Coord, Direction, \
     Action, PlaceAction, MoveAction, EatAction, CascadeAction
 
+DIRECTIONS = [Direction.Up, Direction.Down, Direction.Left, Direction.Right]
 
 def make_empty_board():
     return [[None] * 8 for _ in range(8)]
@@ -133,5 +134,74 @@ class GameState:
             return PlayerColor.BLUE
         return None
                 
+def get_legal_moves(state: GameState) -> list:
+    # placement phase — first 8 turns total (4 per player)
+    if state._turn_count < 8:
+        return _get_placement_moves(state)
+    return _get_play_moves(state)
 
+
+def _get_placement_moves(state: GameState) -> list:
+    moves = []
+    opponent = PlayerColor.BLUE if state.turn_color == PlayerColor.RED else PlayerColor.RED
+
+    # find all cells adjacent to opponent stacks
+    adjacent_to_opponent = set()
+    for r in range(8):
+        for c in range(8):
+            if state.board[r][c] and state.board[r][c][0] == opponent:
+                for d in DIRECTIONS:
+                    adj = state._step(Coord(r, c), d)
+                    if state._in_bounds(adj):
+                        adjacent_to_opponent.add((adj.r, adj.c))
+
+    for r in range(8):
+        for c in range(8):
+            # must be empty
+            if state.board[r][c] is not None:
+                continue
+            # first move of the game has no restriction
+            if state._turn_count == 0:
+                moves.append(PlaceAction(Coord(r, c)))
+                continue
+            # cannot place adjacent to opponent
+            if (r, c) not in adjacent_to_opponent:
+                moves.append(PlaceAction(Coord(r, c)))
+
+    return moves
+
+
+def _get_play_moves(state: GameState) -> list:
+    moves = []
+    opponent = PlayerColor.BLUE if state.turn_color == PlayerColor.RED else PlayerColor.RED
+
+    for r in range(8):
+        for c in range(8):
+            cell = state.board[r][c]
+            if not cell or cell[0] != state.turn_color:
+                continue
+
+            coord = Coord(r, c)
+            height = cell[1]
+
+            for d in DIRECTIONS:
+                dest = state._step(coord, d)
+                if not state._in_bounds(dest):
+                    continue
+
+                dest_cell = state.board[dest.r][dest.c]
+
+                # MOVE: empty or friendly
+                if dest_cell is None or dest_cell[0] == state.turn_color:
+                    moves.append(MoveAction(coord, d))
+
+                # EAT: enemy and tall enough
+                if dest_cell and dest_cell[0] == opponent and height >= dest_cell[1]:
+                    moves.append(EatAction(coord, d))
+
+                # CASCADE: height >= 2
+                if height >= 2:
+                    moves.append(CascadeAction(coord, d))
+
+    return moves
     pass

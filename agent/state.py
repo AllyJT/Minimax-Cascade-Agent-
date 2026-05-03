@@ -26,7 +26,7 @@ class GameState:
             
             # when you move pices, update the board
             case MoveAction(coord, direction):
-                moving_dest = self._step(coord, direction)
+                moving_dest = self.move_coord(coord, direction)
                 moving_start = self.board[coord.r][coord.c]
                 self.board[coord.r][coord.c] = None
 
@@ -40,7 +40,7 @@ class GameState:
                     self.board[moving_dest.r][moving_dest.c] = (self.turn_color, moving_start[1] + moving_dest_height)
             
             case EatAction(coord, direction):
-                eating_dest = self._step(coord, direction)
+                eating_dest = self.move_coord(coord, direction)
                 eating_start = self.board[coord.r][coord.c]
                 self.board[coord.r][coord.c] = None
                 self.board[eating_dest.r][eating_dest.c] = eating_start
@@ -48,7 +48,7 @@ class GameState:
             case CascadeAction(coord, direction):
                 stack_color, moving_dest_height = self.board[coord.r][coord.c]
                 self.board[coord.r][coord.c] = None
-                self._apply_cascade(coord, direction, moving_dest_height, stack_color)
+                self.apply_cascade(coord, direction, moving_dest_height, stack_color)
 
         self.turn_color = (
             PlayerColor.BLUE if self.turn_color == PlayerColor.RED
@@ -56,7 +56,7 @@ class GameState:
         )
         self._turn_count += 1
     
-    def _step(self, coord: Coord, direction: Direction):
+    def move_coord(self, coord: Coord, direction: Direction):
         """ Get the direction coord """
         dr, dc = {
             Direction.Up: (-1, 0),
@@ -66,7 +66,7 @@ class GameState:
         }[direction]
         return Coord(coord.r + dr, coord.c + dc)
     
-    def _apply_cascade(self, coord: Coord, direction: Direction, height: int, color: PlayerColor):
+    def apply_cascade(self, coord: Coord, direction: Direction, height: int, color: PlayerColor):
         """Spread cascade"""
 
         # apply caseacade 
@@ -74,28 +74,29 @@ class GameState:
         current = coord
 
         for _ in range(height):
-            current = self._step(current, direction)
+            current = self.move_coord(current, direction)
             cells.append(current)
         
         for i in reversed(range(len(cells))):
             cell = cells[i]
 
             if self.board[cell.r][cell.c] is not None: 
-                pushed_dest = self._step(cell, direction)
-                if self._in_bounds(pushed_dest):
+                pushed_dest = self.move_coord(cell, direction)
+                if self.in_bounds(pushed_dest):
                     self.board[pushed_dest.r][pushed_dest.c] = self.board[cell.r][cell.c]
 
                 # else pushed off board, eliminated
                 self.board[cell.r][cell.c] = None
         # Place one token per cell in path
         for cell in cells:
-            if self._in_bounds(cell):
+            if self.in_bounds(cell):
                 self.board[cell.r][cell.c] = (color, 
                     (self.board[cell.r][cell.c][1] + 1) 
                     if self.board[cell.r][cell.c] else 1)
     
-    def _in_bounds(self, coord: Coord):
+    def in_bounds(self, coord: Coord):
         return 0 <= coord.r <= 7 and 0 <= coord.c <= 7
+    
     def copy(self):
         new = GameState()
         new.board = copy.deepcopy(self.board)
@@ -121,7 +122,7 @@ class GameState:
             return True
         return False
 
-    def winner(self):
+    def winner_checker(self):
         red_tokens = sum(cell[1] for row in self.board for cell in row if cell and cell[0] == PlayerColor.RED)
         blue_tokens = sum(cell[1] for row in self.board for cell in row if cell and cell[0] == PlayerColor.BLUE)
         if red_tokens == 0:
@@ -137,11 +138,11 @@ class GameState:
 def get_legal_moves(state: GameState) -> list:
     # placement phase — first 8 turns total (4 per player)
     if state._turn_count < 8:
-        return _get_placement_moves(state)
-    return _get_play_moves(state)
+        return get_placement_moves(state)
+    return get_play_moves(state)
 
 
-def _get_placement_moves(state: GameState) -> list:
+def get_placement_moves(state: GameState) -> list:
     moves = []
     opponent = PlayerColor.BLUE if state.turn_color == PlayerColor.RED else PlayerColor.RED
 
@@ -151,8 +152,8 @@ def _get_placement_moves(state: GameState) -> list:
         for c in range(8):
             if state.board[r][c] and state.board[r][c][0] == opponent:
                 for d in DIRECTIONS:
-                    adj = state._step(Coord(r, c), d)
-                    if state._in_bounds(adj):
+                    adj = state.move_coord(Coord(r, c), d)
+                    if state.in_bounds(adj):
                         adjacent_to_opponent.add((adj.r, adj.c))
 
     for r in range(8):
@@ -171,7 +172,7 @@ def _get_placement_moves(state: GameState) -> list:
     return moves
 
 
-def _get_play_moves(state: GameState) -> list:
+def get_play_moves(state: GameState) -> list:
     moves = []
     opponent = PlayerColor.BLUE if state.turn_color == PlayerColor.RED else PlayerColor.RED
 
@@ -185,8 +186,8 @@ def _get_play_moves(state: GameState) -> list:
             height = cell[1]
 
             for d in DIRECTIONS:
-                dest = state._step(coord, d)
-                if not state._in_bounds(dest):
+                dest = state.move_coord(coord, d)
+                if not state.in_bounds(dest):
                     continue
 
                 dest_cell = state.board[dest.r][dest.c]
@@ -204,4 +205,3 @@ def _get_play_moves(state: GameState) -> list:
                     moves.append(CascadeAction(coord, d))
 
     return moves
-    pass

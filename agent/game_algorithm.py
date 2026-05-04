@@ -71,10 +71,7 @@ def get_best_move(state: GameState, my_color, time_remaining=None) -> Action:
     best_move = moves[0]
     
     # adjust depth based on phase and time remaining
-    if state._turn_count < 8:
-        depth = 2  # placement phase
-    else:
-        depth = 3 # play phase
+    depth = 3 # play phase
     # note: depth 4 is too much
     
     for move in moves:

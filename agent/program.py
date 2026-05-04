@@ -5,8 +5,7 @@
 from referee.game import PlayerColor,  Coord, Direction, \
     Action, PlaceAction, MoveAction, EatAction, CascadeAction
 from .game_algorithm import get_best_move
-from .state import GameState
-from agent import state
+from .state import GameState, get_legal_moves
 
 
 class Agent:

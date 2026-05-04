@@ -42,10 +42,13 @@ def minimax(state, depth, alpha, beta, maximising, my_color):
         return best
 
 def get_best_move(state: GameState, my_color, time_remaining=None) -> Action:
-    best_move = None
     best_score = float('-inf')
     # try every possible first move
-    for move in get_legal_moves(state):
+    moves = get_legal_moves(state)
+    if not moves:
+        return None
+    best_move = moves[0]
+    for move in moves:
         new_state = state.copy()
         new_state.apply_action(move)
         # run minimax on each move (opponent moves next)

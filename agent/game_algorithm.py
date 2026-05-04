@@ -16,7 +16,20 @@ def heuristic(state: GameState, my_color) -> float:
     my_tokens = sum(cell[1] for row in state.board for cell in row if cell and cell[0] == my_color)
     opponent_tokens = sum(cell[1] for row in state.board for cell in row if cell and cell[0] == opponent)
     # if i have more tokens than opponent -> positive number, if they have more -> negative number
-    return my_tokens - opponent_tokens
+    centre_score = 0
+    for r in range(8):
+        for c in range(8):
+            cell = state.board[r][c]
+            if cell and cell[0] == my_color:
+                # distance from centre (3.5, 3.5) — closer is better
+                dist = abs(r - 3.5) + abs(c - 3.5)
+                centre_score -= dist * cell[1]  # taller stacks penalised more for being far
+            elif cell and cell[0] == opponent:
+                dist = abs(r - 3.5) + abs(c - 3.5)
+                centre_score += dist * cell[1]
+    token_diff =  (my_tokens - opponent_tokens) * 10 # 10 is a abitrary weight
+
+    return token_diff + centre_score
 
 def minimax(state, depth, alpha, beta, maximising, my_color):
     # looked far enough ahead of game, score board and return
@@ -58,12 +71,10 @@ def get_best_move(state: GameState, my_color, time_remaining=None) -> Action:
     best_move = moves[0]
     
     # adjust depth based on phase and time remaining
-    if time_remaining is not None and time_remaining < 20:
-        depth = 1  # running out of time, be fast
-    elif state._turn_count < 8:
+    if state._turn_count < 8:
         depth = 2  # placement phase
     else:
-        depth = 3  # play phase
+        depth = 4  # play phase
     
     for move in moves:
         new_state = state.copy()

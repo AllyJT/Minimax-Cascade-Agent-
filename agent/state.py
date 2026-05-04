@@ -1,8 +1,9 @@
 # game state representation
 import copy
+from turtle import color
 
 from referee.game import PlayerColor,  Coord, Direction, \
-    Action, PlaceAction, MoveAction, EatAction, CascadeAction
+    Action, PlaceAction, MoveAction, EatAction, CascadeAction, coord
 
 DIRECTIONS = [Direction.Up, Direction.Down, Direction.Left, Direction.Right]
 
@@ -64,35 +65,91 @@ class GameState:
             Direction.Left: (0, -1),
             Direction.Right: (0, 1)
         }[direction]
-        return Coord(coord.r + dr, coord.c + dc)
-    
-    def apply_cascade(self, coord: Coord, direction: Direction, height: int, color: PlayerColor):
-        """Spread cascade"""
+        nr = coord.r + dr
+        nc = coord.c + dc
 
-        # apply caseacade 
+        # checking this for safety
+        if not (0 <= nr < 8 and 0 <= nc < 8):
+            return None
+
+        return Coord(nr, nc)
+        #return Coord(coord.r + dr, coord.c + dc)
+        
+    
+    # def apply_cascade(self, coord: Coord, direction: Direction, height: int, color: PlayerColor):
+    #     """Spread cascade"""
+
+    #     # apply caseacade 
+    #     cells = []
+    #     current = coord
+
+    #     for _ in range(height):
+    #         current = self.move_coord(current, direction)
+    #         if current is None:
+    #             break
+    #         cells.append(current)
+        
+    #     for i in reversed(range(len(cells))):
+    #         cell = cells[i]
+
+    #         # if self.board[cell.r][cell.c] is not None: 
+    #         #     pushed_dest = self.move_coord(cell, direction)
+                
+    #         #     if self.in_bounds(pushed_dest):
+    #         #         self.board[pushed_dest.r][pushed_dest.c] = self.board[cell.r][cell.c]
+
+    #         #     # else pushed off board, eliminated
+    #         #     self.board[cell.r][cell.c] = None
+    #         if self.board[cell.r][cell.c] is not None:
+    #             pushed_stack = self.board[cell.r][cell.c]
+    #             pushed_dest = self.move_coord(cell, direction)
+
+    #             # remove from current cell first
+    #             self.board[cell.r][cell.c] = None
+
+    #             if pushed_dest is None:
+    #                 # pushed off board → eliminated
+    #                 continue
+
+    #             # otherwise move it forward
+    #             self.board[pushed_dest.r][pushed_dest.c] = pushed_stack
+
+    #     # Place one token per cell in path
+    #     for cell in cells:
+    #         if self.in_bounds(cell):
+    #             self.board[cell.r][cell.c] = (color, 
+    #                 (self.board[cell.r][cell.c][1] + 1) 
+    #                 if self.board[cell.r][cell.c] else 1)
+
+    def apply_cascade(self, coord: Coord, direction: Direction, height: int, color: PlayerColor):
+        """Spread one stack into height-1 tokens, pushing stacks along the path."""
+
         cells = []
         current = coord
 
+        # Find the cells where cascade tokens will land.
         for _ in range(height):
             current = self.move_coord(current, direction)
+            if current is None:
+                break
             cells.append(current)
-        
-        for i in reversed(range(len(cells))):
-            cell = cells[i]
 
-            if self.board[cell.r][cell.c] is not None: 
+        # Push existing stacks from farthest to nearest.
+        for cell in reversed(cells):
+            if self.board[cell.r][cell.c] is not None:
+                pushed_stack = self.board[cell.r][cell.c]
                 pushed_dest = self.move_coord(cell, direction)
-                if self.in_bounds(pushed_dest):
-                    self.board[pushed_dest.r][pushed_dest.c] = self.board[cell.r][cell.c]
 
-                # else pushed off board, eliminated
                 self.board[cell.r][cell.c] = None
-        # Place one token per cell in path
+
+                if pushed_dest is not None:
+                    self.board[pushed_dest.r][pushed_dest.c] = pushed_stack
+            # else pushed off board and eliminated
+
+        # Place exactly ONE token on each cascade cell.
+        # always height 1, never add to existing height.
         for cell in cells:
-            if self.in_bounds(cell):
-                self.board[cell.r][cell.c] = (color, 
-                    (self.board[cell.r][cell.c][1] + 1) 
-                    if self.board[cell.r][cell.c] else 1)
+            self.board[cell.r][cell.c] = (color, 1)
     
     def in_bounds(self, coord: Coord):
         return 0 <= coord.r <= 7 and 0 <= coord.c <= 7
@@ -153,6 +210,8 @@ def get_placement_moves(state: GameState) -> list:
             if state.board[r][c] and state.board[r][c][0] == opponent:
                 for d in DIRECTIONS:
                     adj = state.move_coord(Coord(r, c), d)
+                    if adj is None:
+                        continue
                     if state.in_bounds(adj):
                         adjacent_to_opponent.add((adj.r, adj.c))
 
@@ -187,7 +246,10 @@ def get_play_moves(state: GameState) -> list:
 
             for d in DIRECTIONS:
                 dest = state.move_coord(coord, d)
-                if not state.in_bounds(dest):
+                # if not state.in_bounds(dest):
+                #     continue
+
+                if dest is None:
                     continue
 
                 dest_cell = state.board[dest.r][dest.c]

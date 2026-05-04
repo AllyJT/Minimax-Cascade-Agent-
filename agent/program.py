@@ -3,7 +3,10 @@
 
 from referee.game import PlayerColor,  Coord, Direction, \
     Action, PlaceAction, MoveAction, EatAction, CascadeAction
-from .game_algorithm import game_algorithm
+#from .game_algorithm import game_algorithm
+
+from .state import GameState
+from .game_algorithm import get_best_move
 
 
 class Agent:
@@ -19,7 +22,8 @@ class Agent:
         """
         self._color = color
         self._turn_count = 0
-        self.game_state = None
+        # self.game_state = None
+        self._state = GameState()
         match color:
             case PlayerColor.RED:
                 print("Testing: I am playing as RED (first player)")
@@ -53,7 +57,8 @@ class Agent:
         #             return PlaceAction(Coord(7, self._turn_count))
 
         # the algorithm for the move
-        return self._algorithm
+        #return self._algorithm
+        return get_best_move(self._state, self._color, referee.get("time_remaining"))
         # # During play phase
         # match self._color:
         #     case PlayerColor.RED:
@@ -70,6 +75,8 @@ class Agent:
         """
         if color == self._color:
             self._turn_count += 1
+
+        self._state.apply_action(action)
 
         # There are four possible action types: PLACE, MOVE, EAT, and CASCADE.
         # Below we check which type of action was played and print out the

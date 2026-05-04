@@ -46,7 +46,11 @@ class GameState:
                 self.board[eating_dest.r][eating_dest.c] = eating_start
 
             case CascadeAction(coord, direction):
-                stack_color, moving_dest_height = self.board[coord.r][coord.c]
+                cell = self.board[coord.r][coord.c]
+                if cell is None:
+                # handle empty cell case
+                    return
+                stack_color, moving_dest_height = cell      
                 self.board[coord.r][coord.c] = None
                 self.apply_cascade(coord, direction, moving_dest_height, stack_color)
 
@@ -209,7 +213,8 @@ def get_play_moves(state: GameState) -> list:
                     moves.append(EatAction(coord, d))
 
                 # CASCADE: height >= 2
-                if height >= 2:
+            if height >= 2:
+                for d in DIRECTIONS:
                     moves.append(CascadeAction(coord, d))
 
     return moves

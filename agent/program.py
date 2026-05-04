@@ -1,10 +1,12 @@
 # COMP30024 Artificial Intelligence, Semester 1 2026
 # Project Part B: Game Playing Agent
 
+
 from referee.game import PlayerColor,  Coord, Direction, \
     Action, PlaceAction, MoveAction, EatAction, CascadeAction
 from .game_algorithm import get_best_move
 from .state import GameState
+from agent import state
 
 
 class Agent:
@@ -53,8 +55,7 @@ class Agent:
         #             return PlaceAction(Coord(7, self._turn_count))
 
         # the algorithm for the move
-        return get_best_move(self._state, self._color,
-                              time_remaining=referee.get('time_remaining'))
+        return get_best_move(self._state, self._color)
         # # During play phase
         # match self._color:
         #     case PlayerColor.RED:

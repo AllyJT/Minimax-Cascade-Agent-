@@ -74,35 +74,40 @@ class GameState:
         return None
     
     def apply_cascade(self, coord: Coord, direction: Direction, height: int, color: PlayerColor):
-        """Spread cascade"""
+        self.board[coord.r][coord.c] = None
 
-        # apply caseacade 
-        cells = []
-        current = coord
+        for step in range(1, height + 1):
+            nrow = coord.r + direction.r * step
+            ncol = coord.c + direction.c * step
 
-        for _ in range(height):
-            current = self.move_coord(current, direction)
-            if current is None:
-                break
-            cells.append(current)
-        
-        for i in reversed(range(len(cells))):
-            cell = cells[i]
+            # check bounds BEFORE creating Coord
+            if not (0 <= nrow <= 7 and 0 <= ncol <= 7):
+                continue
 
-            if self.board[cell.r][cell.c] is not None: 
-                pushed_dest = self.move_coord(cell, direction)
-                if pushed_dest is not None:
-                    self.board[pushed_dest.r][pushed_dest.c] = self.board[cell.r][cell.c]
+            target = Coord(nrow, ncol)
 
-                # else pushed off board, eliminated
-                self.board[cell.r][cell.c] = None
-        # Place one token per cell in path
-        for cell in cells:
-            if self.in_bounds(cell):
-                self.board[cell.r][cell.c] = (color, 
-                    (self.board[cell.r][cell.c][1] + 1) 
-                    if self.board[cell.r][cell.c] else 1)
-    
+            if self.board[target.r][target.c] is not None:
+                self._push_stack(target, direction)
+
+            self.board[target.r][target.c] = (color, 1)
+
+    def _push_stack(self, coord: Coord, direction: Direction):
+        stack = self.board[coord.r][coord.c]
+        self.board[coord.r][coord.c] = None
+
+        nrow = coord.r + direction.r
+        ncol = coord.c + direction.c
+
+        # check bounds BEFORE creating Coord
+        if not (0 <= nrow <= 7 and 0 <= ncol <= 7):
+            return  # pushed off board, eliminated
+
+        dest = Coord(nrow, ncol)
+        if self.board[dest.r][dest.c] is not None:
+            self._push_stack(dest, direction)
+
+        self.board[dest.r][dest.c] = stack
+
     def in_bounds(self, coord: Coord):
         return 0 <= coord.r <= 7 and 0 <= coord.c <= 7
     
@@ -200,21 +205,19 @@ def get_play_moves(state: GameState) -> list:
                 dest = state.move_coord(coord, d)
                 if dest is None:
                     continue
-                if not state.in_bounds(dest):
-                    continue
+
                 dest_cell = state.board[dest.r][dest.c]
 
-                # MOVE: empty or friendly
                 if dest_cell is None or dest_cell[0] == state.turn_color:
                     moves.append(MoveAction(coord, d))
 
-                # EAT: enemy and tall enough
                 if dest_cell and dest_cell[0] == opponent and height >= dest_cell[1]:
                     moves.append(EatAction(coord, d))
 
-                # CASCADE: height >= 2
+            # ✅ CASCADE outside the direction loop
             if height >= 2:
                 for d in DIRECTIONS:
+                    # print("CASCADING", coord, d)
                     moves.append(CascadeAction(coord, d))
 
     return moves

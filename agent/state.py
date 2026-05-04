@@ -64,7 +64,10 @@ class GameState:
             Direction.Left: (0, -1),
             Direction.Right: (0, 1)
         }[direction]
-        return Coord(coord.r + dr, coord.c + dc)
+        new_dr, new_dc = coord.r + dr, coord.c + dc
+        if 0 <= new_dr <= 7 and 0 <= new_dc <= 7:
+            return Coord(new_dr, new_dc)
+        return None
     
     def apply_cascade(self, coord: Coord, direction: Direction, height: int, color: PlayerColor):
         """Spread cascade"""
@@ -75,6 +78,8 @@ class GameState:
 
         for _ in range(height):
             current = self.move_coord(current, direction)
+            if current is None:
+                break
             cells.append(current)
         
         for i in reversed(range(len(cells))):
@@ -82,7 +87,7 @@ class GameState:
 
             if self.board[cell.r][cell.c] is not None: 
                 pushed_dest = self.move_coord(cell, direction)
-                if self.in_bounds(pushed_dest):
+                if pushed_dest is not None:
                     self.board[pushed_dest.r][pushed_dest.c] = self.board[cell.r][cell.c]
 
                 # else pushed off board, eliminated
@@ -153,6 +158,8 @@ def get_placement_moves(state: GameState) -> list:
             if state.board[r][c] and state.board[r][c][0] == opponent:
                 for d in DIRECTIONS:
                     adj = state.move_coord(Coord(r, c), d)
+                    if adj is None:
+                        continue
                     if state.in_bounds(adj):
                         adjacent_to_opponent.add((adj.r, adj.c))
 
@@ -187,9 +194,10 @@ def get_play_moves(state: GameState) -> list:
 
             for d in DIRECTIONS:
                 dest = state.move_coord(coord, d)
+                if dest is None:
+                    continue
                 if not state.in_bounds(dest):
                     continue
-
                 dest_cell = state.board[dest.r][dest.c]
 
                 # MOVE: empty or friendly

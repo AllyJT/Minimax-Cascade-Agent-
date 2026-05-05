@@ -23,31 +23,6 @@ else:
 
 
 def heuristic(state: GameState, my_color, is_placement=False) -> float:
-    opponent = PlayerColor.BLUE if my_color == PlayerColor.RED else PlayerColor.RED
-
-    my_tokens  = sum(cell[1] for row in state.board for cell in row if cell and cell[0] == my_color)
-    opp_tokens = sum(cell[1] for row in state.board for cell in row if cell and cell[0] == opponent)
-
-    if not is_placement:
-        if opp_tokens == 0:
-            return float('inf')
-        if my_tokens == 0:
-            return float('-inf')
-
-    if is_placement or not _USE_ML:
-        return _hand_tuned(state, my_color, my_tokens, opp_tokens, is_placement)
-
-    features = extract_features(state, my_color)
-    score = float(_W @ ((features - _X_mean) / _X_std))
-
-    current_hash = state.board_hash()
-    repetitions  = state.position_history.get(current_hash, 0)
-    score -= repetitions * 50.0
-
-    return score
-
-
-def _hand_tuned(state, my_color, my_tokens, opp_tokens, is_placement):
     opponent      = PlayerColor.BLUE if my_color == PlayerColor.RED else PlayerColor.RED
     token_diff    = (my_tokens - opp_tokens) * 50
     centre_weight = 25 if is_placement else 1
@@ -131,11 +106,9 @@ def get_best_move(state: GameState, my_color, time_remaining=None) -> Action:
 
     best_move = moves[0]
     best_score = float('-inf')
-    start_time = time.time()
-    # fixed depth — deterministic, no timeout risk
-    for depth in range(1, 4):
-        if time.time() - start_time > 0.5:  # safe for any game length
-            break
+
+    # placement has 60+ moves — depth 3 takes 90+ seconds, must use depth 1
+    depth = 2 if state._turn_count < 8 else 3
 
     for move in order_moves(moves, state, my_color):
         new_state = state.copy()

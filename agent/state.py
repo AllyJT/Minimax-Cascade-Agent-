@@ -121,35 +121,65 @@ class GameState:
     #                 (self.board[cell.r][cell.c][1] + 1) 
     #                 if self.board[cell.r][cell.c] else 1)
 
+    # def apply_cascade(self, coord: Coord, direction: Direction, height: int, color: PlayerColor):
+    #     """Spread one stack into height-1 tokens, pushing stacks along the path."""
+
+    #     cells = []
+    #     current = coord
+
+    #     # Find the cells where cascade tokens will land.
+    #     for _ in range(height):
+    #         current = self.move_coord(current, direction)
+    #         if current is None:
+    #             break
+    #         cells.append(current)
+
+    #     # Push existing stacks from farthest to nearest.
+    #     for cell in reversed(cells):
+    #         if self.board[cell.r][cell.c] is not None:
+    #             pushed_stack = self.board[cell.r][cell.c]
+    #             pushed_dest = self.move_coord(cell, direction)
+
+    #             self.board[cell.r][cell.c] = None
+
+    #             if pushed_dest is not None:
+    #                 self.board[pushed_dest.r][pushed_dest.c] = pushed_stack
+    #         # else pushed off board and eliminated
+
+    #     # Place exactly ONE token on each cascade cell.
+    #     # always height 1, never add to existing height.
+    #     for cell in cells:
+    #         self.board[cell.r][cell.c] = (color, 1)
+
     def apply_cascade(self, coord: Coord, direction: Direction, height: int, color: PlayerColor):
         """Spread one stack into height-1 tokens, pushing stacks along the path."""
 
-        cells = []
+        def push_from(cell: Coord):
+            pushed_stack = self.board[cell.r][cell.c]
+            pushed_dest = self.move_coord(cell, direction)
+
+            self.board[cell.r][cell.c] = None
+
+            if pushed_dest is None:
+                return  # pushed off board = eliminated
+
+            if self.board[pushed_dest.r][pushed_dest.c] is not None:
+                push_from(pushed_dest)
+
+            self.board[pushed_dest.r][pushed_dest.c] = pushed_stack
+
         current = coord
 
-        # Find the cells where cascade tokens will land.
         for _ in range(height):
             current = self.move_coord(current, direction)
+
             if current is None:
                 break
-            cells.append(current)
 
-        # Push existing stacks from farthest to nearest.
-        for cell in reversed(cells):
-            if self.board[cell.r][cell.c] is not None:
-                pushed_stack = self.board[cell.r][cell.c]
-                pushed_dest = self.move_coord(cell, direction)
+            if self.board[current.r][current.c] is not None:
+                push_from(current)
 
-                self.board[cell.r][cell.c] = None
-
-                if pushed_dest is not None:
-                    self.board[pushed_dest.r][pushed_dest.c] = pushed_stack
-            # else pushed off board and eliminated
-
-        # Place exactly ONE token on each cascade cell.
-        # always height 1, never add to existing height.
-        for cell in cells:
-            self.board[cell.r][cell.c] = (color, 1)
+            self.board[current.r][current.c] = (color, 1)
     
     def in_bounds(self, coord: Coord):
         return 0 <= coord.r <= 7 and 0 <= coord.c <= 7

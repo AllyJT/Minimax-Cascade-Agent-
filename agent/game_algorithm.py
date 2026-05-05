@@ -2,12 +2,28 @@
 from referee.game import PlayerColor, Action
 from .state import GameState, get_legal_moves
 
-def heuristic(state: GameState, my_color) -> float:
+# def heuristic(state: GameState, my_color) -> float:
+#     opponent = PlayerColor.BLUE if my_color == PlayerColor.RED else PlayerColor.RED
+#     my_tokens = sum(cell[1] for row in state.board for cell in row if cell and cell[0] == my_color)
+#     opponent_tokens = sum(cell[1] for row in state.board for cell in row if cell and cell[0] == opponent)
+#     # if i have more tokens than opponent -> positive number, if they have more -> negative number
+#     return my_tokens - opponent_tokens
+
+def heuristic(state, my_color):
     opponent = PlayerColor.BLUE if my_color == PlayerColor.RED else PlayerColor.RED
+    
     my_tokens = sum(cell[1] for row in state.board for cell in row if cell and cell[0] == my_color)
-    opponent_tokens = sum(cell[1] for row in state.board for cell in row if cell and cell[0] == opponent)
-    # if i have more tokens than opponent -> positive number, if they have more -> negative number
-    return my_tokens - opponent_tokens
+    opp_tokens = sum(cell[1] for row in state.board for cell in row if cell and cell[0] == opponent)
+    
+    # reward having taller stacks (more powerful)
+    my_max_height = max((cell[1] for row in state.board for cell in row if cell and cell[0] == my_color), default=0)
+    opp_max_height = max((cell[1] for row in state.board for cell in row if cell and cell[0] == opponent), default=0)
+    
+    # reward being able to eat (having tall stacks near enemies)
+    token_diff = my_tokens - opp_tokens
+    height_diff = my_max_height - opp_max_height
+    
+    return token_diff * 10 + height_diff * 3
 
 def minimax(state, depth, alpha, beta, maximising, my_color):
     # looked far enough ahead of game, score board and return

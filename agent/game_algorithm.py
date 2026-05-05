@@ -38,11 +38,11 @@ def heuristic(state: GameState, my_color, is_placement=False) -> float:
     
     my_tokens = sum(cell[1] for row in state.board for cell in row if cell and cell[0] == my_color)
     opp_tokens = sum(cell[1] for row in state.board for cell in row if cell and cell[0] == opponent)
-    
-    if opp_tokens == 0:
-        return float('inf')
-    if my_tokens == 0:
-        return float('-inf')
+    if not is_placement:
+        if opp_tokens == 0:
+            return float('inf')
+        if my_tokens == 0:
+            return float('-inf')
     # add more wright for centre placement
     centre_weight = 5 if is_placement else 1
     # token difference — most important

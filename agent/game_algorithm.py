@@ -1,6 +1,8 @@
 ## Implement the algorithm
-from referee.game import PlayerColor, Action
-from .state import GameState, get_legal_moves
+from referee.game import PlayerColor, Action, Direction
+from referee.game.coord import Coord
+from .state import GameState, get_legal_moves, DIRECTIONS
+
 
 ## Heuristic trial 1 - token count difference
 # def heuristic(state: GameState, my_color) -> float:
@@ -11,25 +13,68 @@ from .state import GameState, get_legal_moves
 #     return my_tokens - opponent_tokens
 
 
+# def heuristic(state: GameState, my_color) -> float:
+#     opponent = PlayerColor.BLUE if my_color == PlayerColor.RED else PlayerColor.RED
+#     my_tokens = sum(cell[1] for row in state.board for cell in row if cell and cell[0] == my_color)
+#     opponent_tokens = sum(cell[1] for row in state.board for cell in row if cell and cell[0] == opponent)
+#     # if i have more tokens than opponent -> positive number, if they have more -> negative number
+#     centre_score = 0
+#     for r in range(8):
+#         for c in range(8):
+#             cell = state.board[r][c]
+#             if cell and cell[0] == my_color:
+#                 # distance from centre (3.5, 3.5) — closer is better
+#                 dist = abs(r - 3.5) + abs(c - 3.5)
+#                 centre_score -= dist * cell[1]  # taller stacks penalised more for being far
+#             elif cell and cell[0] == opponent:
+#                 dist = abs(r - 3.5) + abs(c - 3.5)
+#                 centre_score += dist * cell[1]
+#     token_diff =  (my_tokens - opponent_tokens) * 10 # 10 is a abitrary weight
+
+#     return token_diff + centre_score
+# heuristic trial 3 - token count difference + centre control + eat potential
 def heuristic(state: GameState, my_color) -> float:
     opponent = PlayerColor.BLUE if my_color == PlayerColor.RED else PlayerColor.RED
+    
     my_tokens = sum(cell[1] for row in state.board for cell in row if cell and cell[0] == my_color)
-    opponent_tokens = sum(cell[1] for row in state.board for cell in row if cell and cell[0] == opponent)
-    # if i have more tokens than opponent -> positive number, if they have more -> negative number
+    opp_tokens = sum(cell[1] for row in state.board for cell in row if cell and cell[0] == opponent)
+    
+    if opp_tokens == 0:
+        return float('inf')
+    if my_tokens == 0:
+        return float('-inf')
+    
+    # token difference — most important
+    token_diff = (my_tokens - opp_tokens) * 10
+    
+    # centre score
     centre_score = 0
+    eat_score = 0
+    
     for r in range(8):
         for c in range(8):
             cell = state.board[r][c]
-            if cell and cell[0] == my_color:
-                # distance from centre (3.5, 3.5) — closer is better
-                dist = abs(r - 3.5) + abs(c - 3.5)
-                centre_score -= dist * cell[1]  # taller stacks penalised more for being far
-            elif cell and cell[0] == opponent:
-                dist = abs(r - 3.5) + abs(c - 3.5)
+            if not cell:
+                continue
+            
+            dist = abs(r - 3.5) + abs(c - 3.5)
+            
+            if cell[0] == my_color:
+                centre_score -= dist * cell[1]
+                
+                # reward being adjacent to enemy we can eat
+                for d in DIRECTIONS:
+                    adj = state.move_coord(Coord(r, c), d)
+                    if adj is None:
+                        continue
+                    adj_cell = state.board[adj.r][adj.c]
+                    if adj_cell and adj_cell[0] == opponent:
+                        if cell[1] >= adj_cell[1]:
+                            eat_score += 5  # can eat this enemy!
+            else:
                 centre_score += dist * cell[1]
-    token_diff =  (my_tokens - opponent_tokens) * 10 # 10 is a abitrary weight
-
-    return token_diff + centre_score
+    
+    return token_diff + centre_score + eat_score
 
 def minimax(state, depth, alpha, beta, maximising, my_color):
     # looked far enough ahead of game, score board and return
@@ -71,7 +116,10 @@ def get_best_move(state: GameState, my_color, time_remaining=None) -> Action:
     best_move = moves[0]
     
     # adjust depth based on phase and time remaining
-    depth = 3 # play phase
+    if state._turn_count < 8:
+        depth = 2  # placement phase - look less far ahead
+    else:
+        depth = 3  # play phase - look further ahead
     # note: depth 4 is too much
     
     for move in moves:

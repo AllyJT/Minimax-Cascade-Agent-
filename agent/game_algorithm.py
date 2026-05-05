@@ -130,46 +130,19 @@ def get_best_move(state: GameState, my_color, time_remaining=None) -> Action:
         return None
 
     best_move = moves[0]
+    best_score = float('-inf')
 
-    if time_remaining is None:
-        time_budget = 5.0
-    elif time_remaining < 10:
-        time_budget = 0.5
-    elif time_remaining < 30:
-        time_budget = 1.0
-    else:
-        time_budget = 2.0
+    # fixed depth — deterministic, no timeout risk
+    depth = 2 if state._turn_count < 8 else 3
 
-    if state._turn_count < 8:
-        time_budget = min(time_budget, 2.0)
-
-    start_time = time.time()
-
-    for depth in range(1, 5):
-        if time.time() - start_time > time_budget:
-            break
-
-        depth_best_move  = best_move
-        depth_best_score = float('-inf')
-        timed_out        = False
-
-        for move in moves:
-            if time.time() - start_time > time_budget:
-                timed_out = True
-                break
-
-            new_state = state.copy()
-            new_state.position_history = state.position_history.copy()
-
-            new_state.apply_action(move)
-            score = minimax(new_state, depth=depth, alpha=float('-inf'),
-                            beta=float('inf'), maximising=False, my_color=my_color)
-
-            if score > depth_best_score:
-                depth_best_score = score
-                depth_best_move  = move
-
-        if not timed_out:
-            best_move = depth_best_move
+    for move in order_moves(moves, state, my_color):
+        new_state = state.copy()
+        new_state.position_history = state.position_history.copy()
+        new_state.apply_action(move)
+        score = minimax(new_state, depth=depth, alpha=float('-inf'),
+                        beta=float('inf'), maximising=False, my_color=my_color)
+        if score > best_score:
+            best_score = score
+            best_move = move
 
     return best_move

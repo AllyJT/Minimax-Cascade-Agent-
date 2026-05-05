@@ -1,29 +1,58 @@
 # agent/game_algorithm.py
+import os
 import time
+import numpy as np
 from referee.game import PlayerColor, Action, Coord, EatAction, CascadeAction, MoveAction, PlaceAction
 from .state import GameState, get_legal_moves, DIRECTIONS
+from .features import extract_features
+
+
+# load learned weights once at import time
+_WEIGHTS_FILE = os.path.join(os.path.dirname(__file__), "weights.npy")
+
+if os.path.exists(_WEIGHTS_FILE):
+    _data   = np.load(_WEIGHTS_FILE)
+    _W      = _data[0]
+    _X_mean = _data[1]
+    _X_std  = _data[2]
+    _USE_ML = True
+    print("Loaded learned heuristic weights.")
+else:
+    _USE_ML = False
+    print("weights.npy not found — using hand-tuned heuristic.")
 
 
 def heuristic(state: GameState, my_color, is_placement=False) -> float:
     opponent = PlayerColor.BLUE if my_color == PlayerColor.RED else PlayerColor.RED
 
-    my_tokens = sum(cell[1] for row in state.board for cell in row if cell and cell[0] == my_color)
+    my_tokens  = sum(cell[1] for row in state.board for cell in row if cell and cell[0] == my_color)
     opp_tokens = sum(cell[1] for row in state.board for cell in row if cell and cell[0] == opponent)
 
-    # terminal state checks (play phase only)
     if not is_placement:
         if opp_tokens == 0:
             return float('inf')
         if my_tokens == 0:
             return float('-inf')
 
-    # token difference — heavily weighted
-    token_diff = (my_tokens - opp_tokens) * 50
+    if is_placement or not _USE_ML:
+        return _hand_tuned(state, my_color, my_tokens, opp_tokens, is_placement)
 
-    # centre control
+    features = extract_features(state, my_color)
+    score = float(_W @ ((features - _X_mean) / _X_std))
+
+    current_hash = state.board_hash()
+    repetitions  = state.position_history.get(current_hash, 0)
+    score -= repetitions * 5.0
+
+    return score
+
+
+def _hand_tuned(state, my_color, my_tokens, opp_tokens, is_placement):
+    opponent      = PlayerColor.BLUE if my_color == PlayerColor.RED else PlayerColor.RED
+    token_diff    = (my_tokens - opp_tokens) * 50
     centre_weight = 25 if is_placement else 1
-    centre_score = 0
-    eat_score = 0
+    centre_score  = 0
+    eat_score     = 0
 
     for r in range(8):
         for c in range(8):
@@ -33,7 +62,6 @@ def heuristic(state: GameState, my_color, is_placement=False) -> float:
             dist = abs(r - 3.5) + abs(c - 3.5)
             if cell[0] == my_color:
                 centre_score -= dist * cell[1] * centre_weight
-                # reward being able to eat
                 for d in DIRECTIONS:
                     adj = state.move_coord(Coord(r, c), d)
                     if adj is None:
@@ -44,17 +72,14 @@ def heuristic(state: GameState, my_color, is_placement=False) -> float:
             else:
                 centre_score += dist * cell[1] * centre_weight
 
-    # penalise repeated positions heavily
-    current_hash = state.board_hash()
-    repetitions = state.position_history.get(current_hash, 0)
+    current_hash       = state.board_hash()
+    repetitions        = state.position_history.get(current_hash, 0)
     repetition_penalty = repetitions * 100
 
     return token_diff + centre_score + eat_score - repetition_penalty
 
 
 def order_moves(moves, state, my_color):
-    opponent = PlayerColor.BLUE if my_color == PlayerColor.RED else PlayerColor.RED
-
     def move_priority(move):
         match move:
             case EatAction(coord, direction):
@@ -68,14 +93,12 @@ def order_moves(moves, state, my_color):
                 return 1
             case _:
                 return 2
-
     return sorted(moves, key=move_priority)
 
 
 def minimax(state, depth, alpha, beta, maximising, my_color):
     if depth == 0 or state.is_terminal():
-        is_placement = state._turn_count < 8
-        return heuristic(state, my_color, is_placement)
+        return heuristic(state, my_color, state._turn_count < 8)
 
     if maximising:
         best = float('-inf')
@@ -83,7 +106,7 @@ def minimax(state, depth, alpha, beta, maximising, my_color):
             new_state = state.copy()
             new_state.apply_action(move)
             score = minimax(new_state, depth - 1, alpha, beta, False, my_color)
-            best = max(best, score)
+            best  = max(best, score)
             alpha = max(alpha, best)
             if beta <= alpha:
                 break
@@ -94,8 +117,8 @@ def minimax(state, depth, alpha, beta, maximising, my_color):
             new_state = state.copy()
             new_state.apply_action(move)
             score = minimax(new_state, depth - 1, alpha, beta, True, my_color)
-            best = min(best, score)
-            beta = min(beta, best)
+            best  = min(best, score)
+            beta  = min(beta, best)
             if beta <= alpha:
                 break
         return best
@@ -108,7 +131,6 @@ def get_best_move(state: GameState, my_color, time_remaining=None) -> Action:
 
     best_move = moves[0]
 
-    # time budget per move
     if time_remaining is None:
         time_budget = 5.0
     elif time_remaining < 10:
@@ -118,21 +140,18 @@ def get_best_move(state: GameState, my_color, time_remaining=None) -> Action:
     else:
         time_budget = 2.0
 
-
-    # placement gets less time
     if state._turn_count < 8:
         time_budget = min(time_budget, 2.0)
 
     start_time = time.time()
 
-    # iterative deepening
-    for depth in range(1, 4):
+    for depth in range(1, 5):
         if time.time() - start_time > time_budget:
             break
 
-        depth_best_move = best_move
+        depth_best_move  = best_move
         depth_best_score = float('-inf')
-        timed_out = False
+        timed_out        = False
 
         for move in moves:
             if time.time() - start_time > time_budget:
@@ -142,13 +161,12 @@ def get_best_move(state: GameState, my_color, time_remaining=None) -> Action:
             new_state = state.copy()
             new_state.apply_action(move)
             score = minimax(new_state, depth=depth, alpha=float('-inf'),
-                          beta=float('inf'), maximising=False, my_color=my_color)
+                            beta=float('inf'), maximising=False, my_color=my_color)
 
             if score > depth_best_score:
                 depth_best_score = score
-                depth_best_move = move
+                depth_best_move  = move
 
-        # only update if we finished the full depth
         if not timed_out:
             best_move = depth_best_move
 

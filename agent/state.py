@@ -133,27 +133,23 @@ class GameState:
     
     def copy(self):
         new = GameState()
-        
+
         new.board = copy.deepcopy(self.board)
         new.turn_color = self.turn_color
         new._turn_count = self._turn_count
         new.position_history = {}  # don't copy history into search nodes
         return new
-
     def is_terminal(self):
-        red_tokens = sum(
-            h for row in self.board for cell in row 
-            if cell and (color := cell[0]) == PlayerColor.RED
-            for _, h in [cell]
-        )
-        blue_tokens = sum(
-            h for row in self.board for cell in row
-            if cell and cell[0] == PlayerColor.BLUE
-            for _, h in [cell]
-        )
+        # board is empty during placement — can't be eliminated yet
+        if self._turn_count < 8:
+            return False
+
+        red_tokens = sum(cell[1] for row in self.board for cell in row if cell and cell[0] == PlayerColor.RED)
+        blue_tokens = sum(cell[1] for row in self.board for cell in row if cell and cell[0] == PlayerColor.BLUE)
+
         if red_tokens == 0 or blue_tokens == 0:
             return True
-        if self._turn_count >= 300:
+        if self._turn_count >= 308:
             return True
         return False
 

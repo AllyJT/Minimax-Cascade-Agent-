@@ -42,7 +42,7 @@ def heuristic(state: GameState, my_color, is_placement=False) -> float:
 
     current_hash = state.board_hash()
     repetitions  = state.position_history.get(current_hash, 0)
-    score -= repetitions * 5.0
+    score -= repetitions * 50.0
 
     return score
 
@@ -74,7 +74,7 @@ def _hand_tuned(state, my_color, my_tokens, opp_tokens, is_placement):
 
     current_hash       = state.board_hash()
     repetitions        = state.position_history.get(current_hash, 0)
-    repetition_penalty = repetitions * 100
+    repetition_penalty = repetitions * 500
 
     return token_diff + centre_score + eat_score - repetition_penalty
 
@@ -160,6 +160,7 @@ def get_best_move(state: GameState, my_color, time_remaining=None) -> Action:
 
             new_state = state.copy()
             new_state.position_history = state.position_history.copy()
+
             new_state.apply_action(move)
             score = minimax(new_state, depth=depth, alpha=float('-inf'),
                             beta=float('inf'), maximising=False, my_color=my_color)

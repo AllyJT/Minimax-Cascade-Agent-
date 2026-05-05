@@ -33,7 +33,7 @@ from .state import GameState, get_legal_moves, DIRECTIONS
 
 #     return token_diff + centre_score
 # heuristic trial 3 - token count difference + centre control + eat potential
-def heuristic(state: GameState, my_color) -> float:
+def heuristic(state: GameState, my_color, is_placement=False) -> float:
     opponent = PlayerColor.BLUE if my_color == PlayerColor.RED else PlayerColor.RED
     
     my_tokens = sum(cell[1] for row in state.board for cell in row if cell and cell[0] == my_color)
@@ -43,11 +43,13 @@ def heuristic(state: GameState, my_color) -> float:
         return float('inf')
     if my_tokens == 0:
         return float('-inf')
-    
+    # add more wright for centre placement
+    centre_weight = 5 if is_placement else 1
     # token difference — most important
     token_diff = (my_tokens - opp_tokens) * 10
     
     # centre score
+    
     centre_score = 0
     eat_score = 0
     
@@ -56,13 +58,9 @@ def heuristic(state: GameState, my_color) -> float:
             cell = state.board[r][c]
             if not cell:
                 continue
-            
             dist = abs(r - 3.5) + abs(c - 3.5)
-            
             if cell[0] == my_color:
-                centre_score -= dist * cell[1]
-                
-                # reward being adjacent to enemy we can eat
+                centre_score -= dist * cell[1] * centre_weight
                 for d in DIRECTIONS:
                     adj = state.move_coord(Coord(r, c), d)
                     if adj is None:
@@ -70,16 +68,16 @@ def heuristic(state: GameState, my_color) -> float:
                     adj_cell = state.board[adj.r][adj.c]
                     if adj_cell and adj_cell[0] == opponent:
                         if cell[1] >= adj_cell[1]:
-                            eat_score += 5  # can eat this enemy!
+                            eat_score += 5
             else:
-                centre_score += dist * cell[1]
+                centre_score += dist * cell[1] * centre_weight
     
     return token_diff + centre_score + eat_score
-
 def minimax(state, depth, alpha, beta, maximising, my_color):
     # looked far enough ahead of game, score board and return
     if depth == 0 or state.is_terminal():
-        return heuristic(state, my_color)
+        is_placement = state._turn_count < 8
+        return heuristic(state, my_color, is_placement)
     
     # my turn, pick highest score 
     if maximising:

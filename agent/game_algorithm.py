@@ -1,29 +1,19 @@
 # agent/game_algorithm.py
-import os
-import time
-import numpy as np
 from referee.game import PlayerColor, Action, Coord, EatAction, CascadeAction, MoveAction, PlaceAction
 from .state import GameState, get_legal_moves, DIRECTIONS
-from .features import extract_features
-
-
-# load learned weights once at import time
-_WEIGHTS_FILE = os.path.join(os.path.dirname(__file__), "weights.npy")
-
-if os.path.exists(_WEIGHTS_FILE):
-    _data   = np.load(_WEIGHTS_FILE)
-    _W      = _data[0]
-    _X_mean = _data[1]
-    _X_std  = _data[2]
-    _USE_ML = True
-    print("Loaded learned heuristic weights.")
-else:
-    _USE_ML = False
-    print("weights.npy not found — using hand-tuned heuristic.")
 
 
 def heuristic(state: GameState, my_color, is_placement=False) -> float:
-    opponent      = PlayerColor.BLUE if my_color == PlayerColor.RED else PlayerColor.RED
+    opponent   = PlayerColor.BLUE if my_color == PlayerColor.RED else PlayerColor.RED
+    my_tokens  = sum(cell[1] for row in state.board for cell in row if cell and cell[0] == my_color)
+    opp_tokens = sum(cell[1] for row in state.board for cell in row if cell and cell[0] == opponent)
+
+    if not is_placement:
+        if opp_tokens == 0:
+            return float('inf')
+        if my_tokens == 0:
+            return float('-inf')
+
     token_diff    = (my_tokens - opp_tokens) * 50
     centre_weight = 25 if is_placement else 1
     centre_score  = 0
@@ -104,11 +94,12 @@ def get_best_move(state: GameState, my_color, time_remaining=None) -> Action:
     if not moves:
         return None
 
-    best_move = moves[0]
+    best_move  = moves[0]
     best_score = float('-inf')
 
-    # placement has 60+ moves — depth 3 takes 90+ seconds, must use depth 1
-    depth = 2 if state._turn_count < 8 else 3
+    # placement: depth 1 (60+ moves makes higher depth extremely slow)
+    # play phase: depth 3
+    depth = 1 if state._turn_count < 8 else 3
 
     for move in order_moves(moves, state, my_color):
         new_state = state.copy()
@@ -118,6 +109,6 @@ def get_best_move(state: GameState, my_color, time_remaining=None) -> Action:
                         beta=float('inf'), maximising=False, my_color=my_color)
         if score > best_score:
             best_score = score
-            best_move = move
+            best_move  = move
 
     return best_move

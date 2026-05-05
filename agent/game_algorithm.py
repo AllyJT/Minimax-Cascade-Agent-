@@ -131,9 +131,11 @@ def get_best_move(state: GameState, my_color, time_remaining=None) -> Action:
 
     best_move = moves[0]
     best_score = float('-inf')
-
+    start_time = time.time()
     # fixed depth — deterministic, no timeout risk
-    depth = 2 if state._turn_count < 8 else 3
+    for depth in range(1, 4):
+        if time.time() - start_time > 0.5:  # safe for any game length
+            break
 
     for move in order_moves(moves, state, my_color):
         new_state = state.copy()

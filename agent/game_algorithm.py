@@ -159,6 +159,7 @@ def get_best_move(state: GameState, my_color, time_remaining=None) -> Action:
                 break
 
             new_state = state.copy()
+            new_state.position_history = state.position_history.copy()
             new_state.apply_action(move)
             score = minimax(new_state, depth=depth, alpha=float('-inf'),
                             beta=float('inf'), maximising=False, my_color=my_color)

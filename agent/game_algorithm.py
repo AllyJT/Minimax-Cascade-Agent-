@@ -1,5 +1,6 @@
 ## Implement the algorithm
-from referee.game import PlayerColor, Action, Direction
+
+from referee.game import PlayerColor, Action, Direction, EatAction, CascadeAction, MoveAction
 from referee.game.coord import Coord
 from .state import GameState, get_legal_moves, DIRECTIONS
 
@@ -73,30 +74,26 @@ def heuristic(state: GameState, my_color, is_placement=False) -> float:
                 centre_score += dist * cell[1] * centre_weight
     
     return token_diff + centre_score + eat_score
+
 def minimax(state, depth, alpha, beta, maximising, my_color):
-    # looked far enough ahead of game, score board and return
     if depth == 0 or state.is_terminal():
         is_placement = state._turn_count < 8
         return heuristic(state, my_color, is_placement)
     
-    # my turn, pick highest score 
     if maximising:
         best = float('-inf')
-        # try every move, recurse, keep the best score
-        for move in get_legal_moves(state):
+        for move in order_moves(get_legal_moves(state), state, my_color):  # ← add ordering here
             new_state = state.copy()
             new_state.apply_action(move)
             score = minimax(new_state, depth - 1, alpha, beta, False, my_color)
             best = max(best, score)
-            # skip branches that would score less
             alpha = max(alpha, best)
             if beta <= alpha:
                 break
         return best
-    # opponent's turn, opponent tries to minimize our score
     else:
         best = float('inf')
-        for move in get_legal_moves(state):
+        for move in order_moves(get_legal_moves(state), state, my_color):  # ← and here
             new_state = state.copy()
             new_state.apply_action(move)
             score = minimax(new_state, depth - 1, alpha, beta, True, my_color)
@@ -129,3 +126,22 @@ def get_best_move(state: GameState, my_color, time_remaining=None) -> Action:
             best_move = move
     return best_move
 
+def order_moves(moves, state, my_color):
+    opponent = PlayerColor.BLUE if my_color == PlayerColor.RED else PlayerColor.RED
+    
+    def move_priority(move):
+        match move:
+            case EatAction(coord, direction):
+                # highest priority — reward bigger captures
+                dest = state.move_coord(coord, direction)
+                if dest and state.board[dest.r][dest.c]:
+                    return -state.board[dest.r][dest.c][1]  # bigger eat = higher priority
+                return -1
+            case CascadeAction(coord, direction):
+                return 0   # medium priority
+            case MoveAction(coord, direction):
+                return 1   # lowest priority
+            case _:
+                return 2
+    
+    return sorted(moves, key=move_priority)

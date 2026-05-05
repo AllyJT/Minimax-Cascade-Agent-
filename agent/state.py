@@ -1,7 +1,5 @@
 # game state representation
-import copy
-
-from referee.game import PlayerColor,  Coord, Direction, \
+from referee.game import PlayerColor, Coord, Direction, \
     Action, PlaceAction, MoveAction, EatAction, CascadeAction
 
 DIRECTIONS = [Direction.Up, Direction.Down, Direction.Left, Direction.Right]
@@ -13,161 +11,201 @@ DIR_DELTA = {
     Direction.Right: (0, 1),
 }
 
+# Pre-computed adjacency table: adj[r][c][direction] -> (nr, nc) or None
+_ADJ = [[{} for _ in range(8)] for _ in range(8)]
+for _r in range(8):
+    for _c in range(8):
+        for _d in DIRECTIONS:
+            _dr, _dc = DIR_DELTA[_d]
+            _nr, _nc = _r + _dr, _c + _dc
+            _ADJ[_r][_c][_d] = (_nr, _nc) if 0 <= _nr <= 7 and 0 <= _nc <= 7 else None
+
+
 def make_empty_board():
-    return [[None] * 8 for _ in range(8)]
+    # Flat list of 64 cells (None or (color, height)) — faster to copy than nested list
+    return [None] * 64
+
+
+def idx(r, c):
+    return r * 8 + c
+
 
 class GameState:
     def __init__(self):
-        self.board = make_empty_board()
+        self.board = make_empty_board()   # flat list[64]
         self.turn_color = PlayerColor.RED
         self._turn_count = 0
         self.position_history = {}
 
-    
-    # apply the action to the game state
-    # update turn color, turn count
+        # Incremental token counts — avoid full board scan every heuristic call
+        self.red_tokens = 0
+        self.blue_tokens = 0
+
+        # Incremental hash — XOR Zobrist-style but simpler: just frozenset of occupancy
+        # We maintain a running tuple key lazily; dirty flag avoids recompute
+        self._hash_dirty = True
+        self._cached_hash = None
+
+    # ------------------------------------------------------------------
+    # Board access helpers
+    # ------------------------------------------------------------------
+    def get(self, r, c):
+        return self.board[idx(r, c)]
+
+    def set(self, r, c, val):
+        old = self.board[idx(r, c)]
+        self.board[idx(r, c)] = val
+        # Maintain token counts
+        if old:
+            if old[0] == PlayerColor.RED:
+                self.red_tokens -= old[1]
+            else:
+                self.blue_tokens -= old[1]
+        if val:
+            if val[0] == PlayerColor.RED:
+                self.red_tokens += val[1]
+            else:
+                self.blue_tokens += val[1]
+        self._hash_dirty = True
+
+    def move_coord(self, coord: Coord, direction: Direction):
+        result = _ADJ[coord.r][coord.c][direction]
+        if result is None:
+            return None
+        return Coord(result[0], result[1])
+
+    def move_rc(self, r, c, direction: Direction):
+        """Like move_coord but avoids Coord object creation."""
+        return _ADJ[r][c][direction]  # returns (nr, nc) or None
+
+    # ------------------------------------------------------------------
+    # Copy — fast: list slice + scalar copies, no deepcopy
+    # ------------------------------------------------------------------
+    def copy(self):
+        new = GameState.__new__(GameState)
+        new.board = self.board[:]          # flat list slice — very fast
+        new.turn_color = self.turn_color
+        new._turn_count = self._turn_count
+        new.position_history = {}          # search nodes don't need history
+        new.red_tokens = self.red_tokens
+        new.blue_tokens = self.blue_tokens
+        new._hash_dirty = True
+        new._cached_hash = None
+        return new
+
+    # ------------------------------------------------------------------
+    # Action application
+    # ------------------------------------------------------------------
     def apply_action(self, action: Action):
         match action:
             case PlaceAction(coord):
-                self.board[coord.r][coord.c] = (self.turn_color, 3)
-            
-            # when you move pices, update the board
-            case MoveAction(coord, direction):
-                moving_dest = self.move_coord(coord, direction)
-                moving_start = self.board[coord.r][coord.c]
-                self.board[coord.r][coord.c] = None
+                self.set(coord.r, coord.c, (self.turn_color, 3))
 
-                # update the stack start to our new position (destination)
-                if self.board[moving_dest.r][moving_dest.c] is None:
-                    # record the move to the board history
-                    self.board[moving_dest.r][moving_dest.c] = moving_start
-                else: 
-                    # if there is a stack, combine their heights
-                    _, moving_dest_height = self.board[moving_dest.r][moving_dest.c]
-                    self.board[moving_dest.r][moving_dest.c] = (self.turn_color, moving_start[1] + moving_dest_height)
-            
+            case MoveAction(coord, direction):
+                dest = _ADJ[coord.r][coord.c][direction]
+                if dest is None:
+                    return
+                nr, nc = dest
+                moving_start = self.get(coord.r, coord.c)
+                dest_cell = self.get(nr, nc)
+                self.set(coord.r, coord.c, None)
+                if dest_cell is None:
+                    self.set(nr, nc, moving_start)
+                else:
+                    self.set(nr, nc, (self.turn_color, moving_start[1] + dest_cell[1]))
+
             case EatAction(coord, direction):
-                eating_dest = self.move_coord(coord, direction)
-                eating_start = self.board[coord.r][coord.c]
-                self.board[coord.r][coord.c] = None
-                self.board[eating_dest.r][eating_dest.c] = eating_start
+                dest = _ADJ[coord.r][coord.c][direction]
+                if dest is None:
+                    return
+                nr, nc = dest
+                eating_start = self.get(coord.r, coord.c)
+                self.set(coord.r, coord.c, None)
+                self.set(nr, nc, eating_start)
 
             case CascadeAction(coord, direction):
-                cell = self.board[coord.r][coord.c]
+                cell = self.get(coord.r, coord.c)
                 if cell is None:
-                # handle empty cell case
                     return
-                stack_color, moving_dest_height = cell      
-                self.board[coord.r][coord.c] = None
-                self.apply_cascade(coord, direction, moving_dest_height, stack_color)
+                stack_color, height = cell
+                self.set(coord.r, coord.c, None)
+                self._apply_cascade_inline(coord.r, coord.c, direction, height, stack_color)
 
         self.turn_color = (
             PlayerColor.BLUE if self.turn_color == PlayerColor.RED
             else PlayerColor.RED
         )
         self._turn_count += 1
-        # at end of apply_action
         h = self.board_hash()
         self.position_history[h] = self.position_history.get(h, 0) + 1
-    
-    def move_coord(self, coord: Coord, direction: Direction):
-        """ Get the direction coord """
-        dr, dc = {
-            Direction.Up: (-1, 0),
-            Direction.Down: (1, 0),
-            Direction.Left: (0, -1),
-            Direction.Right: (0, 1)
-        }[direction]
-        new_dr, new_dc = coord.r + dr, coord.c + dc
-        if 0 <= new_dr <= 7 and 0 <= new_dc <= 7:
-            return Coord(new_dr, new_dc)
-        return None
-    
-    def apply_cascade(self, coord: Coord, direction: Direction, height: int, color: PlayerColor):
-        self.board[coord.r][coord.c] = None
-        dr, dc = DIR_DELTA[direction]
 
+    def _apply_cascade_inline(self, r, c, direction, height, color):
+        dr, dc = DIR_DELTA[direction]
         for step in range(1, height + 1):
-            nrow = coord.r + dr * step
-            ncol = coord.c + dc * step
-
-            # check bounds BEFORE creating Coord
-            if not (0 <= nrow <= 7 and 0 <= ncol <= 7):
+            nr = r + dr * step
+            nc = c + dc * step
+            if not (0 <= nr <= 7 and 0 <= nc <= 7):
                 continue
+            if self.get(nr, nc) is not None:
+                self._push_stack_inline(nr, nc, direction)
+            self.set(nr, nc, (color, 1))
 
-            target = Coord(nrow, ncol)
-
-            if self.board[target.r][target.c] is not None:
-                self._push_stack(target, direction)
-
-            self.board[target.r][target.c] = (color, 1)
-
-    def _push_stack(self, coord: Coord, direction: Direction):
-        stack = self.board[coord.r][coord.c]
-        self.board[coord.r][coord.c] = None
+    def _push_stack_inline(self, r, c, direction):
+        stack = self.get(r, c)
+        self.set(r, c, None)
         dr, dc = DIR_DELTA[direction]
+        nr, nc = r + dr, c + dc
+        if not (0 <= nr <= 7 and 0 <= nc <= 7):
+            return  # pushed off board
+        if self.get(nr, nc) is not None:
+            self._push_stack_inline(nr, nc, direction)
+        self.set(nr, nc, stack)
 
-        nrow = coord.r + dr
-        ncol = coord.c + dc
-
-        # check bounds BEFORE creating Coord
-        if not (0 <= nrow <= 7 and 0 <= ncol <= 7):
-            return  # pushed off board, eliminated
-
-        dest = Coord(nrow, ncol)
-        if self.board[dest.r][dest.c] is not None:
-            self._push_stack(dest, direction)
-
-        self.board[dest.r][dest.c] = stack
-
-    def in_bounds(self, coord: Coord):
-        return 0 <= coord.r <= 7 and 0 <= coord.c <= 7
-
+    # ------------------------------------------------------------------
+    # Hash — lazy, only recomputed when dirty
+    # ------------------------------------------------------------------
     def board_hash(self):
-        return tuple(
-            (r, c, cell[0], cell[1])
-            for r, row in enumerate(self.board)
-            for c, cell in enumerate(row)
+        if not self._hash_dirty:
+            return self._cached_hash
+        self._cached_hash = tuple(
+            (i, cell[0], cell[1])
+            for i, cell in enumerate(self.board)
             if cell is not None
         )
-    
-    def copy(self):
-        new = GameState()
+        self._hash_dirty = False
+        return self._cached_hash
 
-        new.board = copy.deepcopy(self.board)
-        new.turn_color = self.turn_color
-        new._turn_count = self._turn_count
-        new.position_history = {}  # don't copy history into search nodes
-        return new
+    # ------------------------------------------------------------------
+    # Terminal check — uses incremental counts, no board scan
+    # ------------------------------------------------------------------
     def is_terminal(self):
-        # board is empty during placement — can't be eliminated yet
         if self._turn_count < 8:
             return False
-
-        red_tokens = sum(cell[1] for row in self.board for cell in row if cell and cell[0] == PlayerColor.RED)
-        blue_tokens = sum(cell[1] for row in self.board for cell in row if cell and cell[0] == PlayerColor.BLUE)
-
-        if red_tokens == 0 or blue_tokens == 0:
+        if self.red_tokens == 0 or self.blue_tokens == 0:
             return True
         if self._turn_count >= 308:
             return True
         return False
 
     def winner_checker(self):
-        red_tokens = sum(cell[1] for row in self.board for cell in row if cell and cell[0] == PlayerColor.RED)
-        blue_tokens = sum(cell[1] for row in self.board for cell in row if cell and cell[0] == PlayerColor.BLUE)
-        if red_tokens == 0:
+        if self.red_tokens == 0:
             return PlayerColor.BLUE
-        if blue_tokens == 0:
+        if self.blue_tokens == 0:
             return PlayerColor.RED
-        if red_tokens > blue_tokens:
+        if self.red_tokens > self.blue_tokens:
             return PlayerColor.RED
-        if blue_tokens > red_tokens:
+        if self.blue_tokens > self.red_tokens:
             return PlayerColor.BLUE
         return None
-                
+
+    def in_bounds(self, coord: Coord):
+        return 0 <= coord.r <= 7 and 0 <= coord.c <= 7
+
+
+# ------------------------------------------------------------------
+# Legal move generation — uses flat board + precomputed adjacency
+# ------------------------------------------------------------------
 def get_legal_moves(state: GameState) -> list:
-    # placement phase — first 8 turns total (4 per player)
     if state._turn_count < 8:
         return get_placement_moves(state)
     return get_play_moves(state)
@@ -177,28 +215,23 @@ def get_placement_moves(state: GameState) -> list:
     moves = []
     opponent = PlayerColor.BLUE if state.turn_color == PlayerColor.RED else PlayerColor.RED
 
-    # find all cells adjacent to opponent stacks
     adjacent_to_opponent = set()
     for r in range(8):
         for c in range(8):
-            if state.board[r][c] and state.board[r][c][0] == opponent:
+            cell = state.get(r, c)
+            if cell and cell[0] == opponent:
                 for d in DIRECTIONS:
-                    adj = state.move_coord(Coord(r, c), d)
-                    if adj is None:
-                        continue
-                    if state.in_bounds(adj):
-                        adjacent_to_opponent.add((adj.r, adj.c))
+                    result = _ADJ[r][c][d]
+                    if result:
+                        adjacent_to_opponent.add(result)
 
     for r in range(8):
         for c in range(8):
-            # must be empty
-            if state.board[r][c] is not None:
+            if state.get(r, c) is not None:
                 continue
-            # first move of the game has no restriction
             if state._turn_count == 0:
                 moves.append(PlaceAction(Coord(r, c)))
                 continue
-            # cannot place adjacent to opponent
             if (r, c) not in adjacent_to_opponent:
                 moves.append(PlaceAction(Coord(r, c)))
 
@@ -207,34 +240,33 @@ def get_placement_moves(state: GameState) -> list:
 
 def get_play_moves(state: GameState) -> list:
     moves = []
-    opponent = PlayerColor.BLUE if state.turn_color == PlayerColor.RED else PlayerColor.RED
+    color = state.turn_color
+    opponent = PlayerColor.BLUE if color == PlayerColor.RED else PlayerColor.RED
 
     for r in range(8):
         for c in range(8):
-            cell = state.board[r][c]
-            if not cell or cell[0] != state.turn_color:
+            cell = state.get(r, c)
+            if not cell or cell[0] != color:
                 continue
 
             coord = Coord(r, c)
             height = cell[1]
 
             for d in DIRECTIONS:
-                dest = state.move_coord(coord, d)
+                dest = _ADJ[r][c][d]
                 if dest is None:
                     continue
+                nr, nc = dest
+                dest_cell = state.get(nr, nc)
 
-                dest_cell = state.board[dest.r][dest.c]
-
-                if dest_cell is None or dest_cell[0] == state.turn_color:
+                if dest_cell is None or dest_cell[0] == color:
                     moves.append(MoveAction(coord, d))
 
                 if dest_cell and dest_cell[0] == opponent and height >= dest_cell[1]:
                     moves.append(EatAction(coord, d))
 
-            # ✅ CASCADE outside the direction loop
             if height >= 2:
                 for d in DIRECTIONS:
-                    # print("CASCADING", coord, d)
                     moves.append(CascadeAction(coord, d))
 
     return moves

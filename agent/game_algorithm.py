@@ -1,12 +1,26 @@
-# agent/game_algorithm.py
+import time
 from referee.game import PlayerColor, Action, Coord, EatAction, CascadeAction, MoveAction, PlaceAction
-from .state import GameState, get_legal_moves, DIRECTIONS
+from .state import GameState, get_legal_moves, DIRECTIONS, _ADJ
 
 
-def heuristic(state: GameState, my_color, is_placement=False) -> float:
-    opponent   = PlayerColor.BLUE if my_color == PlayerColor.RED else PlayerColor.RED
-    my_tokens  = sum(cell[1] for row in state.board for cell in row if cell and cell[0] == my_color)
-    opp_tokens = sum(cell[1] for row in state.board for cell in row if cell and cell[0] == opponent)
+# ---------------------------------------------------------------------------
+# Heuristic
+# ---------------------------------------------------------------------------
+
+# Pre-compute Manhattan distance from centre (3.5, 3.5) for each cell
+_CENTRE_DIST = [
+    abs(r - 3.5) + abs(c - 3.5)
+    for r in range(8)
+    for c in range(8)
+]
+
+
+def heuristic(state: GameState, my_color: PlayerColor, is_placement: bool = False) -> float:
+    opponent = PlayerColor.BLUE if my_color == PlayerColor.RED else PlayerColor.RED
+
+    # Use incremental token counts — no board scan needed
+    my_tokens  = state.red_tokens  if my_color == PlayerColor.RED  else state.blue_tokens
+    opp_tokens = state.blue_tokens if my_color == PlayerColor.RED  else state.red_tokens
 
     if not is_placement:
         if opp_tokens == 0:
@@ -18,97 +32,237 @@ def heuristic(state: GameState, my_color, is_placement=False) -> float:
     centre_weight = 25 if is_placement else 1
     centre_score  = 0
     eat_score     = 0
+    mobility_score = 0
+    cascade_threat = 0
 
     for r in range(8):
         for c in range(8):
-            cell = state.board[r][c]
+            cell = state.get(r, c)
             if not cell:
                 continue
-            dist = abs(r - 3.5) + abs(c - 3.5)
-            if cell[0] == my_color:
-                centre_score -= dist * cell[1] * centre_weight
+
+            dist = _CENTRE_DIST[r * 8 + c]
+            color, height = cell
+
+            if color == my_color:
+                centre_score -= dist * height * centre_weight
+
                 for d in DIRECTIONS:
-                    adj = state.move_coord(Coord(r, c), d)
-                    if adj is None:
+                    dest = _ADJ[r][c][d]
+                    if dest is None:
                         continue
-                    adj_cell = state.board[adj.r][adj.c]
-                    if adj_cell and adj_cell[0] == opponent and cell[1] >= adj_cell[1]:
-                        eat_score += 20
+                    nr, nc = dest
+                    adj_cell = state.get(nr, nc)
+
+                    # EAT opportunity
+                    if adj_cell and adj_cell[0] == opponent and height >= adj_cell[1]:
+                        eat_score += 20 + adj_cell[1] * 5  # reward eating taller stacks more
+
+                    # Mobility: count moves available
+                    if adj_cell is None or adj_cell[0] == my_color:
+                        mobility_score += 1
+
+                # CASCADE threat: tall stacks near enemies are dangerous for opponent
+                if height >= 3:
+                    for d in DIRECTIONS:
+                        dr, dc = DIRECTIONS[0].value if hasattr(DIRECTIONS[0], 'value') else (0, 0)
+                        # scan cascade path for enemy tokens
+                        from .state import DIR_DELTA
+                        ddr, ddc = DIR_DELTA[d]
+                        for step in range(1, height + 1):
+                            nr2 = r + ddr * step
+                            nc2 = c + ddc * step
+                            if not (0 <= nr2 <= 7 and 0 <= nc2 <= 7):
+                                break
+                            target = state.get(nr2, nc2)
+                            if target and target[0] == opponent:
+                                cascade_threat += 15
+                                break
             else:
-                centre_score += dist * cell[1] * centre_weight
+                centre_score += dist * height * centre_weight
 
     current_hash       = state.board_hash()
     repetitions        = state.position_history.get(current_hash, 0)
     repetition_penalty = repetitions * 500
 
-    return token_diff + centre_score + eat_score - repetition_penalty
+    return token_diff + centre_score + eat_score + mobility_score + cascade_threat - repetition_penalty
 
 
-def order_moves(moves, state, my_color):
+# ---------------------------------------------------------------------------
+# Move ordering
+# ---------------------------------------------------------------------------
+
+def order_moves(moves, state: GameState, my_color: PlayerColor):
+    opponent = PlayerColor.BLUE if my_color == PlayerColor.RED else PlayerColor.RED
+
     def move_priority(move):
         match move:
             case EatAction(coord, direction):
-                dest = state.move_coord(coord, direction)
-                if dest and state.board[dest.r][dest.c]:
-                    return -state.board[dest.r][dest.c][1]
+                dest = _ADJ[coord.r][coord.c][direction]
+                if dest:
+                    target = state.get(dest[0], dest[1])
+                    if target:
+                        return -target[1] - 100   # eat is best; bigger targets first
                 return -1
-            case CascadeAction():
+            case CascadeAction(coord, direction):
+                # Prefer cascades that threaten enemies
+                from .state import DIR_DELTA
+                cell = state.get(coord.r, coord.c)
+                if not cell:
+                    return 5
+                height = cell[1]
+                dr, dc = DIR_DELTA[direction]
+                for step in range(1, height + 1):
+                    nr = coord.r + dr * step
+                    nc = coord.c + dc * step
+                    if not (0 <= nr <= 7 and 0 <= nc <= 7):
+                        break
+                    target = state.get(nr, nc)
+                    if target and target[0] == opponent:
+                        return -50   # threatening cascade
                 return 0
             case MoveAction():
                 return 1
             case _:
                 return 2
+
     return sorted(moves, key=move_priority)
 
 
-def minimax(state, depth, alpha, beta, maximising, my_color):
+# ---------------------------------------------------------------------------
+# Alpha-beta minimax
+# ---------------------------------------------------------------------------
+
+def minimax(state: GameState, depth: int, alpha: float, beta: float,
+            maximising: bool, my_color: PlayerColor,
+            deadline: float) -> float:
+    # Time check — bail early if we're over budget
+    if time.time() > deadline:
+        raise TimeoutError()
+
     if depth == 0 or state.is_terminal():
+        return heuristic(state, my_color, state._turn_count < 8)
+
+    moves = order_moves(get_legal_moves(state), state, my_color)
+    if not moves:
         return heuristic(state, my_color, state._turn_count < 8)
 
     if maximising:
         best = float('-inf')
-        for move in order_moves(get_legal_moves(state), state, my_color):
+        for move in moves:
             new_state = state.copy()
             new_state.apply_action(move)
-            score = minimax(new_state, depth - 1, alpha, beta, False, my_color)
-            best  = max(best, score)
-            alpha = max(alpha, best)
+            score = minimax(new_state, depth - 1, alpha, beta, False, my_color, deadline)
+            if score > best:
+                best = score
+            if best > alpha:
+                alpha = best
             if beta <= alpha:
                 break
         return best
     else:
         best = float('inf')
-        for move in order_moves(get_legal_moves(state), state, my_color):
+        for move in moves:
             new_state = state.copy()
             new_state.apply_action(move)
-            score = minimax(new_state, depth - 1, alpha, beta, True, my_color)
-            best  = min(best, score)
-            beta  = min(beta, best)
+            score = minimax(new_state, depth - 1, alpha, beta, True, my_color, deadline)
+            if score < best:
+                best = score
+            if best < beta:
+                beta = best
             if beta <= alpha:
                 break
         return best
 
 
-def get_best_move(state: GameState, my_color, time_remaining=None) -> Action:
+# ---------------------------------------------------------------------------
+# Iterative deepening with time guard
+# ---------------------------------------------------------------------------
+
+# Safety margin: stop searching with this many seconds left so we don't TLE
+_TIME_SAFETY_MARGIN = 0.05   # 50 ms buffer per move
+
+# Hard cap on time per move (seconds). 180s / ~150 expected moves ≈ 1.2s each,
+# but we keep a generous cap so early game doesn't blow the budget.
+_MAX_TIME_PER_MOVE = 1.0
+
+
+def get_best_move(state: GameState, my_color: PlayerColor,
+                  time_remaining=None) -> Action:
     moves = get_legal_moves(state)
     if not moves:
         return None
 
-    best_move  = moves[0]
-    best_score = float('-inf')
+    # ---- Time budget -------------------------------------------------------
+    if time_remaining is not None:
+        # Scale time per move based on how much we have left
+        # Assume ~100 remaining play moves on average
+        budget = min(time_remaining / 100, _MAX_TIME_PER_MOVE)
+        budget = max(budget - _TIME_SAFETY_MARGIN, 0.05)  # at least 50ms
+    else:
+        budget = _MAX_TIME_PER_MOVE
 
-    # placement: depth 1 (60+ moves makes higher depth extremely slow)
-    # play phase: depth 3
-    depth = 1 if state._turn_count < 8 else 3
+    deadline = time.time() + budget
 
-    for move in order_moves(moves, state, my_color):
+    # ---- Placement phase: depth 1 (huge branching factor ~50+ moves) -------
+    if state._turn_count < 8:
+        ordered = order_moves(moves, state, my_color)
+        best_move  = ordered[0]
+        best_score = float('-inf')
+        for move in ordered:
+            new_state = state.copy()
+            new_state.apply_action(move)
+            score = heuristic(new_state, my_color, True)
+            if score > best_score:
+                best_score = score
+                best_move  = move
+        return best_move
+
+    # ---- Play phase: iterative deepening -----------------------------------
+    ordered      = order_moves(moves, state, my_color)
+    best_move    = ordered[0]   # fallback: best-ordered move at depth 0
+    best_score   = float('-inf')
+
+    # Evaluate depth-0 scores so we always have something to return
+    for move in ordered:
         new_state = state.copy()
-        new_state.position_history = state.position_history.copy()
         new_state.apply_action(move)
-        score = minimax(new_state, depth=depth, alpha=float('-inf'),
-                        beta=float('inf'), maximising=False, my_color=my_color)
+        score = heuristic(new_state, my_color, False)
         if score > best_score:
             best_score = score
             best_move  = move
+
+    # Iterative deepening: depth 1, 2, 3, ...
+    for depth in range(1, 5):   # cap at depth 4; time guard will cut earlier
+        candidate_move  = best_move
+        candidate_score = float('-inf')
+        try:
+            for move in ordered:
+                new_state = state.copy()
+                new_state.position_history = state.position_history.copy()
+                new_state.apply_action(move)
+                score = minimax(
+                    new_state,
+                    depth=depth,
+                    alpha=float('-inf'),
+                    beta=float('inf'),
+                    maximising=False,
+                    my_color=my_color,
+                    deadline=deadline,
+                )
+                if score > candidate_score:
+                    candidate_score = score
+                    candidate_move  = move
+
+            # Full depth completed — commit result
+            best_move  = candidate_move
+            best_score = candidate_score
+
+            # Re-order for next iteration: put best move first (cheap killer move)
+            ordered = [best_move] + [m for m in ordered if m != best_move]
+
+        except TimeoutError:
+            # Incomplete depth — discard partial results, keep last complete depth
+            break
 
     return best_move

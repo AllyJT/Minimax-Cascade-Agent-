@@ -44,7 +44,12 @@ def heuristic(state: GameState, my_color, is_placement=False) -> float:
             else:
                 centre_score += dist * cell[1] * centre_weight
 
-    return token_diff + centre_score + eat_score
+    # penalise repeated positions heavily
+    current_hash = state.board_hash()
+    repetitions = state.position_history.get(current_hash, 0)
+    repetition_penalty = repetitions * 100
+
+    return token_diff + centre_score + eat_score - repetition_penalty
 
 
 def order_moves(moves, state, my_color):
@@ -110,10 +115,9 @@ def get_best_move(state: GameState, my_color, time_remaining=None) -> Action:
         time_budget = 0.5
     elif time_remaining < 30:
         time_budget = 1.0
-    elif time_remaining < 60:
-        time_budget = 2.0
     else:
-        time_budget = 4.0
+        time_budget = 2.0
+
 
     # placement gets less time
     if state._turn_count < 8:
@@ -122,7 +126,7 @@ def get_best_move(state: GameState, my_color, time_remaining=None) -> Action:
     start_time = time.time()
 
     # iterative deepening
-    for depth in range(1, 7):
+    for depth in range(1, 4):
         if time.time() - start_time > time_budget:
             break
 

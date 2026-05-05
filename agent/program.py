@@ -54,7 +54,7 @@ class Agent:
         #             return PlaceAction(Coord(7, self._turn_count))
 
         # the algorithm for the move
-        return get_best_move(self._state, self._color)
+        return get_best_move(self._state, self._color, referee.get("time_remaining"))
         # # During play phase
         # match self._color:
         #     case PlayerColor.RED:
@@ -63,7 +63,14 @@ class Agent:
         #     case PlayerColor.BLUE:
         #         print("Testing: BLUE is playing a MOVE action")
                 # return MoveAction(Coord(7, 0), Direction.Up)
-
+    def board_hash(self):
+        """Simple hash of current board state"""
+        result = []
+        for r in range(8):
+            for c in range(8):
+                if self.board[r][c]:
+                    result.append((r, c, self.board[r][c][0], self.board[r][c][1]))
+        return tuple(result)
     def update(self, color: PlayerColor, action: Action, **referee: dict):
         """
         This method is called by the referee after a player has taken their

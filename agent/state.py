@@ -6,6 +6,13 @@ from referee.game import PlayerColor,  Coord, Direction, \
 
 DIRECTIONS = [Direction.Up, Direction.Down, Direction.Left, Direction.Right]
 
+DIR_DELTA = {
+    Direction.Up:    (-1, 0),
+    Direction.Down:  (1, 0),
+    Direction.Left:  (0, -1),
+    Direction.Right: (0, 1),
+}
+
 def make_empty_board():
     return [[None] * 8 for _ in range(8)]
 
@@ -59,6 +66,9 @@ class GameState:
             else PlayerColor.RED
         )
         self._turn_count += 1
+        # at end of apply_action
+        h = self.board_hash()
+        self.position_history[h] = self.position_history.get(h, 0) + 1
     
     def move_coord(self, coord: Coord, direction: Direction):
         """ Get the direction coord """
@@ -75,10 +85,11 @@ class GameState:
     
     def apply_cascade(self, coord: Coord, direction: Direction, height: int, color: PlayerColor):
         self.board[coord.r][coord.c] = None
+        dr, dc = DIR_DELTA[direction]
 
         for step in range(1, height + 1):
-            nrow = coord.r + direction.r * step
-            ncol = coord.c + direction.c * step
+            nrow = coord.r + dr * step
+            ncol = coord.c + dc * step
 
             # check bounds BEFORE creating Coord
             if not (0 <= nrow <= 7 and 0 <= ncol <= 7):
@@ -94,9 +105,10 @@ class GameState:
     def _push_stack(self, coord: Coord, direction: Direction):
         stack = self.board[coord.r][coord.c]
         self.board[coord.r][coord.c] = None
+        dr, dc = DIR_DELTA[direction]
 
-        nrow = coord.r + direction.r
-        ncol = coord.c + direction.c
+        nrow = coord.r + dr
+        ncol = coord.c + dc
 
         # check bounds BEFORE creating Coord
         if not (0 <= nrow <= 7 and 0 <= ncol <= 7):
@@ -110,13 +122,22 @@ class GameState:
 
     def in_bounds(self, coord: Coord):
         return 0 <= coord.r <= 7 and 0 <= coord.c <= 7
+
+    def board_hash(self):
+        return tuple(
+            (r, c, cell[0], cell[1])
+            for r, row in enumerate(self.board)
+            for c, cell in enumerate(row)
+            if cell is not None
+        )
     
     def copy(self):
         new = GameState()
+        
         new.board = copy.deepcopy(self.board)
         new.turn_color = self.turn_color
         new._turn_count = self._turn_count
-        new.position_history = self.position_history.copy()
+        new.position_history = {}  # don't copy history into search nodes
         return new
 
     def is_terminal(self):

@@ -34,17 +34,17 @@ def heuristic(state: GameState, my_color, is_placement=False) -> float:
         if my_tokens == 0:
             return float('-inf')
 
-    if is_placement or not _USE_ML:
-        return _hand_tuned(state, my_color, my_tokens, opp_tokens, is_placement)
+    # if is_placement or not _USE_ML:
+    #     return _hand_tuned(state, my_color, my_tokens, opp_tokens, is_placement)
 
-    features = extract_features(state, my_color)
-    score = float(_W @ ((features - _X_mean) / _X_std))
+    # features = extract_features(state, my_color)
+    # score = float(_W @ ((features - _X_mean) / _X_std))
 
-    current_hash = state.board_hash()
-    repetitions  = state.position_history.get(current_hash, 0)
-    score -= repetitions * 50.0
+    # current_hash = state.board_hash()
+    # repetitions  = state.position_history.get(current_hash, 0)
+    # score -= repetitions * 50.0
 
-    return score
+    return _hand_tuned(state, my_color, my_tokens, opp_tokens, is_placement)
 
 
 def _hand_tuned(state, my_color, my_tokens, opp_tokens, is_placement):

@@ -84,7 +84,7 @@ def heuristic(state: GameState, my_color: PlayerColor, is_placement: bool = Fals
             # reward us to have tall opponent stack near edge
             else:
                 total_score -= reserve_height
-                total_score += dist * height * centre_weight
+                total_score += dist * edge_danger * centre_weight
 
 
     current_hash       = state.board_hash()

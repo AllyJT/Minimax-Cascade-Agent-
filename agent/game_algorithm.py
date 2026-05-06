@@ -29,7 +29,7 @@ def heuristic(state: GameState, my_color: PlayerColor, is_placement: bool = Fals
     # Strategy 1 Token different, with the strongest weight
     token_diff = (my_tokens - opp_tokens) * 100
 
-    centre_weight = 25 if is_placement else 5
+    centre_weight = 25 if is_placement else 1
     total_score = 0
 
     for r in range(8):
@@ -77,15 +77,15 @@ def heuristic(state: GameState, my_color: PlayerColor, is_placement: bool = Fals
                             target = state.get(nr2, nc2)
                             if target and target[0] == opponent:
                                 # reward cascade that hit higher stacks
-                                total_score += 15 + target[1] * 10
+                                total_score += 50 + target[1] * 25
                                 break
                             # reward us to have tall opponent stack near edge
             else:
                 # Strategy: Use the same squared math to value pushing enemies off
                 # If the opponent is on the edge, it's a huge opportunity for us
                 # I used 1.25 for make it aggressive but not too much
-                total_score -= reserve_height
-                total_score += (dist ** 1.25) * height * 2
+                total_score -= (height ** 2) * 20 
+                total_score += (dist ** 1.5) * height * 2
 
     current_hash       = state.board_hash()
     repetitions        = state.position_history.get(current_hash, 0)
@@ -151,9 +151,7 @@ def minimax(state: GameState, depth: int, alpha: float, beta: float,
     
     current_color = my_color if maximising else opponent                    
     moves = order_moves(get_legal_moves(state), state, current_color)
-    # Sort moves to try eat first, then cascades, then moves, then placements 
-    # to reduce overhead of alpha-beta and increase pruning efficiency
-    moves = sorted(moves, key=lambda m: 0 if isinstance(m, EatAction) else 1)
+
     if not moves:
         return heuristic(state, my_color, state._turn_count < 8)
 

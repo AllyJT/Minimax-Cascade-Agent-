@@ -23,17 +23,14 @@ def heuristic(state: GameState, my_color: PlayerColor, is_placement: bool = Fals
     opp_tokens = state.blue_tokens if my_color == PlayerColor.RED  else state.red_tokens
 
     if not is_placement:
-        if opp_tokens == 0:
-            return float('inf')
-        if my_tokens == 0:
-            return float('-inf')
+        if opp_tokens == 0: return float('inf')
+        if my_tokens == 0: return float('-inf')
+    
+    # Strategy 1 Token different, with the strongest weight
+    token_diff = (my_tokens - opp_tokens) * 100
 
-    token_diff    = (my_tokens - opp_tokens) * 50
     centre_weight = 25 if is_placement else 1
-    centre_score  = 0
-    eat_score     = 0
-    mobility_score = 0
-    cascade_threat = 0
+    total_score = 0
 
     for r in range(8):
         for c in range(8):
@@ -43,9 +40,15 @@ def heuristic(state: GameState, my_color: PlayerColor, is_placement: bool = Fals
 
             dist = _CENTRE_DIST[r * 8 + c]
             color, height = cell
+            edge_danger = (dist ** 2) # the edge is dangerous, penalise
 
+            # Strategy 2: favour height of stack
+            reserve_height = (height ** 1.5) * 15
+
+            
             if color == my_color:
-                centre_score -= dist * height * centre_weight
+                total_score += reserve_height
+                total_score -= dist * edge_danger* centre_weight
 
                 for d in DIRECTIONS:
                     dest = _ADJ[r][c][d]
@@ -56,11 +59,11 @@ def heuristic(state: GameState, my_color: PlayerColor, is_placement: bool = Fals
 
                     # EAT opportunity
                     if adj_cell and adj_cell[0] == opponent and height >= adj_cell[1]:
-                        eat_score += 20 + adj_cell[1] * 5  # reward eating taller stacks more
+                        total_score += 20 + adj_cell[1] * 5  # reward eating taller stacks more
 
                     # Mobility: count moves available
                     if adj_cell is None or adj_cell[0] == my_color:
-                        mobility_score += 1
+                        total_score += 1
 
                 # CASCADE threat: tall stacks near enemies are dangerous for opponent
                 if height >= 3:
@@ -76,16 +79,19 @@ def heuristic(state: GameState, my_color: PlayerColor, is_placement: bool = Fals
                                 break
                             target = state.get(nr2, nc2)
                             if target and target[0] == opponent:
-                                cascade_threat += 15
+                                total_score += 15
                                 break
+            # reward us to have tall opponent stack near edge
             else:
-                centre_score += dist * height * centre_weight
+                total_score -= reserve_height
+                total_score += dist * height * centre_weight
+
 
     current_hash       = state.board_hash()
     repetitions        = state.position_history.get(current_hash, 0)
     repetition_penalty = repetitions * 500
 
-    return token_diff + centre_score + eat_score + mobility_score + cascade_threat - repetition_penalty
+    return token_diff + total_score - repetition_penalty
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 import time
 from referee.game import PlayerColor, Action, Coord, EatAction, CascadeAction, MoveAction, PlaceAction
-from .state import GameState, get_legal_moves, DIRECTIONS, _ADJ
+from .state import DIR_DELTA, GameState, get_legal_moves, DIRECTIONS, _ADJ
 
 
 # ---------------------------------------------------------------------------
@@ -29,7 +29,7 @@ def heuristic(state: GameState, my_color: PlayerColor, is_placement: bool = Fals
     # Strategy 1 Token different, with the strongest weight
     token_diff = (my_tokens - opp_tokens) * 100
 
-    centre_weight = 25 if is_placement else 1
+    centre_weight = 25 if is_placement else 5
     total_score = 0
 
     for r in range(8):
@@ -68,9 +68,6 @@ def heuristic(state: GameState, my_color: PlayerColor, is_placement: bool = Fals
                 # CASCADE threat: tall stacks near enemies are dangerous for opponent
                 if height >= 3:
                     for d in DIRECTIONS:
-                        dr, dc = DIRECTIONS[0].value if hasattr(DIRECTIONS[0], 'value') else (0, 0)
-                        # scan cascade path for enemy tokens
-                        from .state import DIR_DELTA
                         ddr, ddc = DIR_DELTA[d]
                         for step in range(1, height + 1):
                             nr2 = r + ddr * step
@@ -79,13 +76,16 @@ def heuristic(state: GameState, my_color: PlayerColor, is_placement: bool = Fals
                                 break
                             target = state.get(nr2, nc2)
                             if target and target[0] == opponent:
-                                total_score += 15
+                                # reward cascade that hit higher stacks
+                                total_score += 15 + target[1] * 10
                                 break
-            # reward us to have tall opponent stack near edge
+                            # reward us to have tall opponent stack near edge
             else:
+                # Strategy: Use the same squared math to value pushing enemies off
+                # If the opponent is on the edge, it's a huge opportunity for us
+                # I used 1.25 for make it aggressive but not too much
                 total_score -= reserve_height
-                total_score += dist * edge_danger * centre_weight
-
+                total_score += (dist ** 1.25) * height * 2
 
     current_hash       = state.board_hash()
     repetitions        = state.position_history.get(current_hash, 0)
@@ -112,7 +112,6 @@ def order_moves(moves, state: GameState, my_color: PlayerColor):
                 return -1
             case CascadeAction(coord, direction):
                 # Prefer cascades that threaten enemies
-                from .state import DIR_DELTA
                 cell = state.get(coord.r, coord.c)
                 if not cell:
                     return 5
@@ -145,11 +144,16 @@ def minimax(state: GameState, depth: int, alpha: float, beta: float,
     # Time check — bail early if we're over budget
     if time.time() > deadline:
         raise TimeoutError()
+    opponent = PlayerColor.BLUE if my_color == PlayerColor.RED else PlayerColor.RED
 
     if depth == 0 or state.is_terminal():
         return heuristic(state, my_color, state._turn_count < 8)
-
-    moves = order_moves(get_legal_moves(state), state, my_color)
+    
+    current_color = my_color if maximising else opponent                    
+    moves = order_moves(get_legal_moves(state), state, current_color)
+    # Sort moves to try eat first, then cascades, then moves, then placements 
+    # to reduce overhead of alpha-beta and increase pruning efficiency
+    moves = sorted(moves, key=lambda m: 0 if isinstance(m, EatAction) else 1)
     if not moves:
         return heuristic(state, my_color, state._turn_count < 8)
 
@@ -210,7 +214,7 @@ def get_best_move(state: GameState, my_color: PlayerColor,
 
     deadline = time.time() + budget
 
-    # ---- Placement phase: depth 1 (huge branching factor ~50+ moves) -------
+    # ---- Placement phase: depth 1 -------
     if state._turn_count < 8:
         ordered = order_moves(moves, state, my_color)
         best_move  = ordered[0]

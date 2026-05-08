@@ -84,7 +84,7 @@ def heuristic(state: GameState, my_color: PlayerColor, is_placement: bool = Fals
                 # Strategy: Use the same squared math to value pushing enemies off
                 # If the opponent is on the edge, it's a huge opportunity for us
                 # I used 1.25 for make it aggressive but not too much
-                total_score -= (height ** 2) * 20 
+                total_score -= (height ** 1.5) * 10  
                 total_score += (dist ** 1.5) * height * 2
 
     current_hash       = state.board_hash()
@@ -213,6 +213,7 @@ def get_best_move(state: GameState, my_color: PlayerColor,
     deadline = time.time() + budget
 
     # ---- Placement phase: depth 1 -------
+    # In get_best_move, placement phase
     if state._turn_count < 8:
         ordered = order_moves(moves, state, my_color)
         best_move  = ordered[0]
@@ -220,7 +221,16 @@ def get_best_move(state: GameState, my_color: PlayerColor,
         for move in ordered:
             new_state = state.copy()
             new_state.apply_action(move)
-            score = heuristic(new_state, my_color, True)
+            # Look 2 plies ahead instead of 0
+            try:
+                score = minimax(
+                    new_state, depth=3,
+                    alpha=float('-inf'), beta=float('inf'),
+                    maximising=False, my_color=my_color,
+                    deadline=deadline,
+                )
+            except TimeoutError:
+                score = heuristic(new_state, my_color, True)
             if score > best_score:
                 best_score = score
                 best_move  = move

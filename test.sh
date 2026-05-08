@@ -1,116 +1,148 @@
 #!/bin/bash
-NEW_WINS=0
-OLD_WINS=0
-OLD_DRAWS=0
-GAMES=20
+GAMES=10
 
+# ---------------------------------------------------------------------------
+# Counters
+# ---------------------------------------------------------------------------
+# vs random (RED)
+AVR_W=0; AVR_L=0; AVR_D=0
+# vs random (BLUE)
+AVB_W=0; AVB_L=0; AVB_D=0
+# vs greedy (RED)
+AGR_W=0; AGR_L=0; AGR_D=0
+# vs greedy (BLUE)
+AGB_W=0; AGB_L=0; AGB_D=0
+# vs minimax (RED)
+AMR_W=0; AMR_L=0; AMR_D=0
+# vs minimax (BLUE)
+AMB_W=0; AMB_L=0; AMB_D=0
+
+# ---------------------------------------------------------------------------
+# Helper functions
+# ---------------------------------------------------------------------------
+run_game() {
+    local red=$1
+    local blue=$2
+    python -m referee "$red" "$blue" 2>&1
+}
+
+record() {
+    local result=$1
+    local win_color=$2   # the color our agent is playing
+    local w_var=$3
+    local l_var=$4
+    local d_var=$5
+
+    if echo "$result" | grep -q "winner is $win_color"; then
+        eval "$w_var=\$((\$$w_var + 1))"
+    elif echo "$result" | grep -qE "winner is (RED|BLUE)"; then
+        eval "$l_var=\$((\$$l_var + 1))"
+    else
+        eval "$d_var=\$((\$$d_var + 1))"
+    fi
+}
+
+# ---------------------------------------------------------------------------
 echo "========================================"
-echo "TEST 1: agent (RED) vs old_agent (BLUE)"
+echo "TEST 1: agent (RED) vs random_agent (BLUE)"
 echo "========================================"
 for i in $(seq 1 $GAMES); do
-    echo "Game $i"
-    result=$(python -m referee agent old_agent 2>&1)
-    echo "$result"
-    
-    if echo "$result" | grep -q "winner is RED"; then
-        NEW_WINS=$((NEW_WINS + 1))
-    elif echo "$result" | grep -q "winner is BLUE"; then
-        OLD_WINS=$((OLD_WINS + 1))
-    else
-        OLD_DRAWS=$((OLD_DRAWS + 1))
-    fi
+    echo -n "  Game $i ... "
+    result=$(run_game agent random_agent)
+    record "$result" RED AVR_W AVR_L AVR_D
+    echo "$result" | grep -oE "winner is (RED|BLUE)|draw" | tail -1
 done
+echo "  W $AVR_W / L $AVR_L / D $AVR_D"
 
-echo "========================"
-echo "agent wins:     $NEW_WINS/$GAMES"
-echo "old_agent wins: $OLD_WINS/$GAMES"
-echo "draws:          $OLD_DRAWS/$GAMES"
-
-
+# ---------------------------------------------------------------------------
 echo ""
-echo "=========================================="
-echo "TEST 2: agent (RED) vs random_agent (BLUE)"
-echo "=========================================="
-AGENT_VS_RANDOM=0
-RANDOM_VS_AGENT=0
-
+echo "========================================"
+echo "TEST 2: random_agent (RED) vs agent (BLUE)"
+echo "========================================"
 for i in $(seq 1 $GAMES); do
-    echo "Game $i"
-    result=$(python -m referee agent random_agent 2>&1)
-    echo "$result"
-    
-    if echo "$result" | grep -q "winner is RED"; then
-        AGENT_VS_RANDOM=$((AGENT_VS_RANDOM + 1))
-    else
-        RANDOM_VS_AGENT=$((RANDOM_VS_AGENT + 1))
-    fi
+    echo -n "  Game $i ... "
+    result=$(run_game random_agent agent)
+    record "$result" BLUE AVB_W AVB_L AVB_D
+    echo "$result" | grep -oE "winner is (RED|BLUE)|draw" | tail -1
 done
+echo "  W $AVB_W / L $AVB_L / D $AVB_D"
 
-echo "========================"
-echo "agent wins:        $AGENT_VS_RANDOM/$GAMES"
-echo "random_agent wins: $RANDOM_VS_AGENT/$GAMES"
-
-
+# ---------------------------------------------------------------------------
 echo ""
-echo "============================================"
-echo "TEST 3: random_agent (RED) vs agent (BLUE)"
-echo "============================================"
-RANDOM_RED_WINS=0
-AGENT_BLUE_WINS=0
-
+echo "========================================"
+echo "TEST 3: agent (RED) vs greedy_agent (BLUE)"
+echo "========================================"
 for i in $(seq 1 $GAMES); do
-    echo "Game $i"
-    result=$(python -m referee random_agent agent 2>&1)
-    echo "$result"
-    
-    if echo "$result" | grep -q "winner is BLUE"; then
-        AGENT_BLUE_WINS=$((AGENT_BLUE_WINS + 1))
-    else
-        RANDOM_RED_WINS=$((RANDOM_RED_WINS + 1))
-    fi
+    echo -n "  Game $i ... "
+    result=$(run_game agent greedy_agent)
+    record "$result" RED AGR_W AGR_L AGR_D
+    echo "$result" | grep -oE "winner is (RED|BLUE)|draw" | tail -1
 done
+echo "  W $AGR_W / L $AGR_L / D $AGR_D"
 
-echo "========================"
-echo "agent wins (BLUE):        $AGENT_BLUE_WINS/$GAMES"
-echo "random_agent wins (RED):  $RANDOM_RED_WINS/$GAMES"
+# ---------------------------------------------------------------------------
+echo ""
+echo "========================================"
+echo "TEST 4: greedy_agent (RED) vs agent (BLUE)"
+echo "========================================"
+for i in $(seq 1 $GAMES); do
+    echo -n "  Game $i ... "
+    result=$(run_game greedy_agent agent)
+    record "$result" BLUE AGB_W AGB_L AGB_D
+    echo "$result" | grep -oE "winner is (RED|BLUE)|draw" | tail -1
+done
+echo "  W $AGB_W / L $AGB_L / D $AGB_D"
 
+# ---------------------------------------------------------------------------
+echo ""
+echo "========================================"
+echo "TEST 5: agent (RED) vs minimax_agent (BLUE)"
+echo "========================================"
+for i in $(seq 1 $GAMES); do
+    echo -n "  Game $i ... "
+    result=$(run_game agent minimax_agent)
+    record "$result" RED AMR_W AMR_L AMR_D
+    echo "$result" | grep -oE "winner is (RED|BLUE)|draw" | tail -1
+done
+echo "  W $AMR_W / L $AMR_L / D $AMR_D"
 
-# echo ""
-# echo "========================================"
-# echo "TEST 4: agent (RED) vs minimax_agent (BLUE)"
-# echo "========================================"
-# AGENT_VS_MINI=0
-# MINI_VS_AGENT=0
-# MINI_DRAWS=0
+# ---------------------------------------------------------------------------
+echo ""
+echo "========================================"
+echo "TEST 6: minimax_agent (RED) vs agent (BLUE)"
+echo "========================================"
+for i in $(seq 1 $GAMES); do
+    echo -n "  Game $i ... "
+    result=$(run_game minimax_agent agent)
+    record "$result" BLUE AMB_W AMB_L AMB_D
+    echo "$result" | grep -oE "winner is (RED|BLUE)|draw" | tail -1
+done
+echo "  W $AMB_W / L $AMB_L / D $AMB_D"
 
-# for i in $(seq 1 $GAMES); do
-#     echo "Game $i"
-#     result=$(python -m referee agent minimax_agent 2>&1)
-#     echo "$result"
-#     if echo "$result" | grep -q "winner is RED"; then
-#         AGENT_VS_MINI=$((AGENT_VS_MINI + 1))
-#     elif echo "$result" | grep -q "winner is BLUE"; then
-#         MINI_VS_AGENT=$((MINI_VS_AGENT + 1))
-#     else
-#         MINI_DRAWS=$((MINI_DRAWS + 1))
-#     fi
-# done
+# ---------------------------------------------------------------------------
+# Totals
+# ---------------------------------------------------------------------------
+RANDOM_W=$((AVR_W + AVB_W))
+RANDOM_L=$((AVR_L + AVB_L))
+RANDOM_D=$((AVR_D + AVB_D))
 
-echo "========================"
-echo "agent wins:         $AGENT_VS_MINI/$GAMES"
-echo "minimax_agent wins: $MINI_VS_AGENT/$GAMES"
-echo "draws:              $MINI_DRAWS/$GAMES"
+GREEDY_W=$((AGR_W + AGB_W))
+GREEDY_L=$((AGR_L + AGB_L))
+GREEDY_D=$((AGR_D + AGB_D))
 
+MINI_W=$((AMR_W + AMB_W))
+MINI_L=$((AMR_L + AMB_L))
+MINI_D=$((AMR_D + AMB_D))
+
+TOTAL_W=$((RANDOM_W + GREEDY_W + MINI_W))
+TOTAL_G=$((GAMES * 6))
 
 echo ""
 echo "========================================"
-echo "FINAL SUMMARY"
+echo "FINAL SUMMARY  (W / L / D  out of $((GAMES * 2)) games each)"
 echo "========================================"
-echo "agent vs old_agent:     $NEW_WINS W / $OLD_WINS L / $OLD_DRAWS D  (out of $GAMES)"
-echo "agent vs random (RED):  $AGENT_VS_RANDOM W / $RANDOM_VS_AGENT L   (out of $GAMES)"
-echo "agent vs random (BLUE): $AGENT_BLUE_WINS W / $RANDOM_RED_WINS L   (out of $GAMES)"
-echo "agent vs minimax:       $AGENT_VS_MINI W / $MINI_VS_AGENT L / $MINI_DRAWS D  (out of $GAMES)"
-TOTAL_AGENT=$((NEW_WINS + AGENT_VS_RANDOM + AGENT_BLUE_WINS + AGENT_VS_MINI))
-TOTAL_GAMES=$((GAMES * 4))
-echo "------------------------"
-echo "agent total: $TOTAL_AGENT/$TOTAL_GAMES"
+echo "vs random_agent:  $RANDOM_W W / $RANDOM_L L / $RANDOM_D D"
+echo "vs greedy_agent:  $GREEDY_W W / $GREEDY_L L / $GREEDY_D D"
+echo "vs minimax_agent: $MINI_W W / $MINI_L L / $MINI_D D"
+echo "----------------------------------------"
+echo "total agent wins: $TOTAL_W / $TOTAL_G"

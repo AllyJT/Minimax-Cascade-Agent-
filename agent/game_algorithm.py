@@ -32,85 +32,80 @@ def heuristic(state: GameState, my_color: PlayerColor, is_placement: bool = Fals
         if opp_tokens == 0: return float('inf')
         if my_tokens  == 0: return float('-inf')
 
-    # Token difference — strongest signal
-    token_diff = (my_tokens - opp_tokens) * 100
+    # Material advantage — primary winning condition
+    score = (my_tokens - opp_tokens) * 100.0
 
-    # Endgame urgency: bonus for being close to eliminating opponent
-    endgame_bonus = 0.0
-    if opp_tokens <= 4:
-        endgame_bonus = (5 - opp_tokens) * 200   # press harder when opponent is low
-
-    centre_weight = 20 if is_placement else 0.8
-    total_score = 0.0
+    my_height_sq  = 0.0
+    opp_height_sq = 0.0
+    my_edge_pen   = 0.0
+    opp_edge_pen  = 0.0
+    my_threats    = 0   # tokens we can immediately capture
+    opp_threats   = 0   # tokens opponent can immediately capture
 
     for r in range(8):
         for c in range(8):
             cell = state.get(r, c)
             if not cell:
                 continue
-
-            idx   = r * 8 + c
-            dist  = _CENTRE_DIST[idx]
             color, height = cell
+            is_mine = (color == my_color)
 
-            if color == my_color:
-                # Reward height (stacking power)
-                total_score += (height ** 1.5) * 15
+            edge_dist = min(r, 7 - r, c, 7 - c)
+            edge_pen  = max(0, 2 - edge_dist) * height
 
-                # Penalise being near edge — FIXED: quadratic, not cubic
-                total_score -= (dist ** 2) * centre_weight
-
-                # Reward eat opportunities
-                for d in DIRECTIONS:
-                    dest = _ADJ[r][c][d]
-                    if dest is None:
-                        continue
-                    nr, nc = dest
-                    adj_cell = state.get(nr, nc)
-
-                    if adj_cell and adj_cell[0] == opponent and height >= adj_cell[1]:
-                        total_score += 20 + adj_cell[1] * 5
-
-                    # Mobility
-                    if adj_cell is None or adj_cell[0] == my_color:
-                        total_score += 1
-
-                # Cascade threats on tall stacks
-                if height >= 3:
-                    for d in DIRECTIONS:
-                        ddr, ddc = DIR_DELTA[d]
-                        for step in range(1, height + 1):
-                            nr2 = r + ddr * step
-                            nc2 = c + ddc * step
-                            if not (0 <= nr2 <= 7 and 0 <= nc2 <= 7):
-                                break
-                            target = state.get(nr2, nc2)
-                            if target and target[0] == opponent:
-                                total_score += 50 + target[1] * 25
-                                break
-
-                # Vulnerability: penalise stacks that can be eaten by opponent
-                for d in DIRECTIONS:
-                    dest = _ADJ[r][c][d]
-                    if dest is None:
-                        continue
-                    nr, nc = dest
-                    adj_cell = state.get(nr, nc)
-                    if adj_cell and adj_cell[0] == opponent and adj_cell[1] >= height:
-                        total_score -= 30 + height * 10  # penalise being eaten
-
+            if is_mine:
+                my_height_sq += height * height
+                my_edge_pen  += edge_pen
+                if is_placement:
+                    # Strong centre reward during placement
+                    score += (7 - _CENTRE_DIST[r * 8 + c]) * 10
             else:
-                # FIXED: reward opponent stacks being NEAR edge (small dist = dangerous for them)
-                # Previously this was reversed — opponents far from edge were rewarded
-                total_score -= (height ** 2) * 20
-                total_score -= (dist ** 1.5) * height * 2   # near-edge opponent = good for us
+                opp_height_sq += height * height
+                opp_edge_pen  += edge_pen
 
-    current_hash  = state.board_hash()
-    repetitions   = state.position_history.get(current_hash, 0)
-    # FIXED: repetition penalty must dominate token advantage to prevent forced draws
-    repetition_penalty = repetitions * 5000
+            # Immediate eat threats (symmetric for both sides)
+            for d in DIRECTIONS:
+                dest = _ADJ[r][c][d]
+                if dest is None:
+                    continue
+                nb = state.get(dest[0], dest[1])
+                if nb and nb[0] != color and height >= nb[1]:
+                    if is_mine:
+                        my_threats += nb[1]   # tokens we can capture right now
+                    else:
+                        opp_threats += nb[1]  # tokens they can capture right now
 
-    return token_diff + endgame_bonus + total_score - repetition_penalty
+    # Cascade threats (both sides)
+    my_cascade  = 0
+    opp_cascade = 0
+    for r in range(8):
+        for c in range(8):
+            cell = state.get(r, c)
+            if not cell:
+                continue
+            color, height = cell
+            if height < 3:
+                continue
+            for d in DIRECTIONS:
+                dr, dc = DIR_DELTA[d]
+                for step in range(1, height + 1):
+                    nr, nc = r + dr * step, c + dc * step
+                    if not (0 <= nr <= 7 and 0 <= nc <= 7):
+                        break
+                    target = state.get(nr, nc)
+                    if target and target[0] != color:
+                        if color == my_color:
+                            my_cascade += target[1]
+                        else:
+                            opp_cascade += target[1]
+                        break
+
+    score += (my_height_sq  - opp_height_sq)  * 1.5
+    score += (opp_edge_pen  - my_edge_pen)    * 2.0
+    score += (my_threats    - opp_threats)    * 20.0   # tactical: net eat advantage
+    score += (my_cascade    - opp_cascade)    * 30.0   # tactical: cascade advantage
+
+    return score
 
 
 # ---------------------------------------------------------------------------
@@ -189,8 +184,12 @@ class MoveOrderer:
                 case MoveAction():
                     return 100 - hist
 
+                case PlaceAction(coord):
+                    dist = abs(coord.r - 3.5) + abs(coord.c - 3.5)
+                    return int(150 + dist) - hist  # centre placements first
+
                 case _:
-                    return 200
+                    return 300
 
         return sorted(moves, key=priority)
 
@@ -209,12 +208,21 @@ def minimax(
     deadline: float,
     tt: dict,
     orderer: MoveOrderer,
+    path_set: set = None,
+    game_history: dict = None,
     tt_depth_offset: int = 0,
 ) -> float:
     if time.time() > deadline:
         raise TimeoutError()
 
     opponent = PlayerColor.BLUE if my_color == PlayerColor.RED else PlayerColor.RED
+
+    h = state.board_hash()
+
+    # Cycle detection: if this position appears on the current search path,
+    # the line leads to a draw by repetition — score it neutrally
+    if path_set is not None and h in path_set:
+        return 0
 
     # --- Terminal / leaf ---
     if state.is_terminal():
@@ -224,10 +232,14 @@ def minimax(
         return                         -1_000_000 - depth
 
     if depth == 0:
-        return heuristic(state, my_color, state._turn_count < 8)
+        leaf_score = heuristic(state, my_color, state._turn_count < 8)
+        if game_history:
+            reps = game_history.get(h, 0)
+            leaf_score -= reps * 150   # penalise positions already seen in the actual game
+        return leaf_score
 
     # --- Transposition table lookup ---
-    board_key = (state.board_hash(), depth, maximising)
+    board_key = (h, depth, maximising)
     if board_key in tt:
         tt_score, tt_flag, tt_depth = tt[board_key]
         if tt_depth >= depth:
@@ -250,15 +262,16 @@ def minimax(
     best = float('-inf') if maximising else float('inf')
     best_move = None
 
+    if path_set is not None:
+        path_set.add(h)
+
     for move in moves:
         new_state = state.copy()
-        # FIXED: copy position_history so repetition tracking is correct in tree
-        new_state.position_history = state.position_history.copy()
         new_state.apply_action(move)
 
         score = minimax(
             new_state, depth - 1, alpha, beta,
-            not maximising, my_color, deadline, tt, orderer
+            not maximising, my_color, deadline, tt, orderer, path_set, game_history
         )
 
         if maximising:
@@ -278,6 +291,9 @@ def minimax(
                 orderer.record_killer(depth, best_move)
                 orderer.record_history(best_move, depth)
             break
+
+    if path_set is not None:
+        path_set.discard(h)
 
     # --- Store in transposition table ---
     if best == float('-inf') or best == float('inf'):
@@ -301,7 +317,7 @@ def minimax(
 # ---------------------------------------------------------------------------
 
 _TIME_SAFETY_MARGIN = 0.05
-_MAX_TIME_PER_MOVE  = 1.0
+_MAX_TIME_PER_MOVE  = 2.0
 
 
 def get_best_move(
@@ -327,54 +343,58 @@ def get_best_move(
 
     deadline = time.time() + budget
 
-    # --- Placement phase: use shallow search (but not just depth-1 greedy) ---
-    if state._turn_count < 8:
-        ordered    = orderer.order_moves(moves, state, my_color, 0)
-        best_move  = ordered[0]
-        best_score = float('-inf')
-        for move in ordered:
-            new_state = state.copy()
-            new_state.apply_action(move)
-            score = heuristic(new_state, my_color, True)
-            if score > best_score:
-                best_score = score
-                best_move  = move
-        return best_move
+    is_placement = state._turn_count < 8
 
-    # --- Play phase: iterative deepening ---
+    # Actual game position history — passed into search to penalise revisiting real positions
+    game_history = state.position_history
+    # Positions that have appeared twice in the actual game — a third visit draws
+    seen_twice = {h for h, c in game_history.items() if c >= 2}
+    # Seed the search path with the current game position so cycles back to it are detected
+    game_hash = state.board_hash()
+
+    # --- Iterative deepening (all phases) ---
     ordered    = orderer.order_moves(moves, state, my_color, 0)
     best_move  = ordered[0]
     best_score = float('-inf')
 
-    # Depth-0 baseline
+    # Depth-0 baseline — always available before timeout can fire
     for move in ordered:
         new_state = state.copy()
         new_state.apply_action(move)
-        score = heuristic(new_state, my_color, False)
+        score = heuristic(new_state, my_color, is_placement)
         if score > best_score:
             best_score = score
             best_move  = move
 
     # Iterative deepening
-    for depth in range(1, 8):
+    for depth in range(1, 12):
         candidate_move  = best_move
         candidate_score = float('-inf')
         try:
             for move in ordered:
                 new_state = state.copy()
-                new_state.position_history = state.position_history.copy()
                 new_state.apply_action(move)
-                score = minimax(
-                    new_state,
-                    depth=depth,
-                    alpha=float('-inf'),
-                    beta=float('inf'),
-                    maximising=False,   # after our move, opponent minimises
-                    my_color=my_color,
-                    deadline=deadline,
-                    tt=tt,
-                    orderer=orderer,
-                )
+
+                new_h = new_state.board_hash()
+                if new_h in seen_twice:
+                    # This move would cause threefold repetition → treat as draw
+                    score = -5000 if best_score > -5000 else 0
+                else:
+                    # Fresh path_set per top-level move; seed with current game position
+                    path_set = {game_hash}
+                    score = minimax(
+                        new_state,
+                        depth=depth,
+                        alpha=float('-inf'),
+                        beta=float('inf'),
+                        maximising=False,   # after our move, opponent minimises
+                        my_color=my_color,
+                        deadline=deadline,
+                        tt=tt,
+                        orderer=orderer,
+                        path_set=path_set,
+                        game_history=game_history,
+                    )
                 if score > candidate_score:
                     candidate_score = score
                     candidate_move  = move
@@ -405,6 +425,7 @@ class Agent:
         time_remaining = referee.get("time_remaining", None)
         return get_best_move(
             self._state,
+         
             self._color,
             time_remaining=time_remaining,
             tt=self._tt,

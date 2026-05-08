@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"from agent.game_algorithm import Agent, get_best_move; print\\('OK'\\)\")"
+    ]
+  }
+}

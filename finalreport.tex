@@ -1,0 +1,372 @@
+\documentclass[12pt,a4paper]{article}
+
+% Packages
+\usepackage[a4paper, margin=2.5cm]{geometry}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{parskip}
+\usepackage{setspace}
+\usepackage{titlesec}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{microtype}
+\usepackage{fancyhdr}
+\usepackage{graphicx}
+
+% Section formatting
+\titleformat{\section}{\large\bfseries}{\thesection.}{0.5em}{}
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection}{0.5em}{}
+\titleformat{\subsubsection}{\normalsize\itshape}{\thesubsubsection}{0.5em}{}
+
+% Header / footer
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{COMP30024 – Project Part B}
+\lhead{Water Bottle}
+\rfoot{\thepage}
+
+% Spacing
+\setlength{\parskip}{6pt}
+\setlength{\parindent}{0pt}
+\onehalfspacing
+
+% Hyperlink styling
+\hypersetup{
+    colorlinks=true,
+    linkcolor=black,
+    urlcolor=black
+}
+
+% ============================================================
+\begin{document}
+
+% ---- Title page ------------------------------------------------
+\begin{titlepage}
+    \centering
+    \vspace*{2cm}
+
+    {\large The University of Melbourne}\\[0.5em]
+    {\large COMP30024 -- Artificial Intelligence}\\[0.5em]
+    {\large Project Part B: Game Playing Agent}\\[2cm]
+
+    {\LARGE\bfseries Playing Cascade Using Minimax}\\[2cm]
+
+    {\large Water Bottle}\\[0.5em]
+    {\normalsize
+        Phuong Trang Tran -- 1409466\\
+        Ha Linh Nguyen -- 1492069
+    }\\[3cm]
+
+    {\normalsize Semester 1, 2026}
+
+    \vfill
+\end{titlepage}
+
+% ---- Overview --------------------------------------------------
+\section*{Overview}
+
+This report describes the design and implementation of a game-playing agent for Cascade, a two-player adversarial board game. The agent is built on iterative deepening alpha-beta minimax with a multi-feature evaluation function, a transposition table, and dedicated mechanisms for handling draw-by-repetition. The report is structured as follows: Section~\ref{sec:approach} describes the final agent's action selection approach; Section~\ref{sec:performance} evaluates its performance; Section~\ref{sec:failed} documents failed heuristic trials that motivated the final design; Section~\ref{sec:technical} covers technical optimisations; and Section~\ref{sec:supporting} describes supporting development work.
+
+\newpage
+
+% ================================================================
+\section{Approach: Action Selection}
+\label{sec:approach}
+
+\subsection{Overview}
+
+The agent selects actions using \textbf{iterative deepening alpha-beta minimax} as its core search strategy. On every turn, the algorithm performs successive full-depth searches from depth~1 up to a maximum of~12, subject to a per-move time budget of 2.0~seconds. The search is guided by a multi-feature evaluation function, a transposition table, and a move ordering system. Two dedicated mechanisms handle draw-by-repetition, which was identified as the dominant failure mode in earlier versions.
+
+% ----------------------------------------------------------------
+\subsection{Search Algorithm}
+
+\textbf{Iterative Deepening.}
+At each turn, the agent runs alpha-beta minimax at depth~1, then depth~2, and so on, until the time budget is exhausted. If a \texttt{TimeoutError} is raised mid-depth, the result from the last fully completed depth is committed. This ensures the agent always returns a well-reasoned move even under time pressure, while naturally using as much of the available time as possible.
+
+\textbf{Alpha-Beta Pruning.}
+Alpha-beta pruning is applied throughout the search tree. When a beta-cutoff occurs --- a move is proven too good for the maximising player, so the minimising player would avoid the subtree --- the remaining moves at that node are skipped. For well-ordered move lists, this reduces the effective branching factor to approximately the square root of the full tree, allowing the agent to search roughly twice as deep as plain minimax in the same time.
+
+\textbf{Transposition Table.}
+A transposition table (TT) is maintained across the entire game, not just a single turn, so search results from earlier turns can benefit later ones. Each entry stores a score, a bound type, and the depth at which it was computed:
+
+\begin{itemize}[noitemsep]
+    \item \texttt{TT\_EXACT}: the stored score is exact --- return it directly.
+    \item \texttt{TT\_LOWER} (alpha bound): use it to raise alpha.
+    \item \texttt{TT\_UPPER} (beta bound): use it to lower beta.
+\end{itemize}
+
+The table is capped at 500,000 entries to prevent unbounded memory growth.
+
+% ----------------------------------------------------------------
+\subsection{Move Ordering}
+
+Quality move ordering is critical to alpha-beta efficiency. A \texttt{MoveOrderer} class maintains two complementary heuristics across the entire game:
+
+\textbf{Killer Moves.}
+Up to two moves per search depth that have previously caused a beta-cutoff are stored. These are tried before other moves at the same depth in subsequent iterations, as they are statistically likely to cause cutoffs again.
+
+\textbf{History Heuristic.}
+Every move that causes a cutoff increments a persistent counter weighted by $2^{\text{depth}}$. Moves with higher history scores are searched earlier. This rewards moves that are consistently strong across different board positions throughout the game.
+
+\textbf{Static Priority.}
+Within each node, moves are additionally ordered by static type before killer and history scores are applied:
+
+\begin{enumerate}[noitemsep]
+    \item Winning moves (captures the opponent's last token) --- searched first.
+    \item \texttt{EatAction} moves, ordered by tokens captured (larger captures first).
+    \item \texttt{CascadeAction} moves that threaten opponent tokens.
+    \item \texttt{MoveAction} moves.
+    \item \texttt{PlaceAction} moves, ordered by proximity to the board centre.
+\end{enumerate}
+
+% ----------------------------------------------------------------
+\subsection{Repetition and Cycle Handling}
+
+\textbf{Path-Set Cycle Detection.}
+A mutable set of board hashes (\texttt{path\_set}) is threaded through every level of the minimax recursion. Before expanding a node, the algorithm checks whether the current board hash is already in the set --- if so, the line leads to a draw by repetition and is scored~0. The hash is added before recursing and removed (\texttt{discard}) after, maintaining the invariant that the set contains exactly the positions on the current search path.
+
+\textbf{Game History Penalty at Leaf Nodes.}
+The actual game's \texttt{position\_history} dictionary (mapping board hash to visit count) is passed into minimax as a read-only parameter. At depth-0 leaf nodes, positions that have already been visited in the real game receive a penalty of $-150$ per prior visit. This steers the agent away from revisiting real-game positions and converts oscillation patterns into decisive lines.
+
+\textbf{Threefold Repetition Avoidance.}
+At the root of \texttt{get\_best\_move}, any move whose resulting position hash already appears two or more times in \texttt{position\_history} is scored as a draw ($-5000$ if a better alternative exists, otherwise~0), preventing an automatic loss-by-draw.
+
+% ----------------------------------------------------------------
+\subsection{Evaluation Function}
+
+The heuristic estimates board quality from the agent's perspective using six additive terms:
+
+\begin{equation}
+h(s) = 100\,(T_{\text{self}} - T_{\text{opp}})
+      + 1.5\,(H^{2}_{\text{self}} - H^{2}_{\text{opp}})
+      + 2.0\,(E_{\text{opp}} - E_{\text{self}})
+      + 20\,(A_{\text{self}} - A_{\text{opp}})
+      + 30\,(C_{\text{self}} - C_{\text{opp}})
+\end{equation}
+
+where $T$ denotes total tokens, $H^{2}$ denotes sum of squared stack heights, $E$ denotes edge penalty (height-weighted proximity to board edge), $A$ denotes immediate eat-threat tokens, and $C$ denotes cascade-threat tokens.
+
+\textbf{Material Advantage.}
+The difference in total token count is given the dominant weight of~100, reflecting that token elimination is the primary winning condition of Cascade.
+
+\textbf{Height Advantage.}
+Stack heights are squared and summed for each side. The squared term rewards concentration --- a single tall stack is worth more than two short ones of equivalent total height, reflecting the greater cascade potential of taller stacks.
+
+\textbf{Edge Penalty Advantage.}
+Tokens near the board edge have fewer available moves and are more vulnerable to being pushed off by cascade actions. The net edge penalty rewards the agent for keeping its own tokens central while pushing the opponent toward the edges.
+
+\textbf{Eat Threats.}
+The net number of tokens immediately capturable by each side (via \texttt{EatAction}) is weighted at~20 per token. This is a strong short-term tactical signal --- being able to capture while avoiding capture is directly decisive.
+
+\textbf{Cascade Threats.}
+For each tall stack (height $\geq 3$), the search checks whether a cascade in any direction would hit an opponent token. The net cascade-threat advantage is weighted at~30 per token, higher than simple eat threats, reflecting the chained destructive potential of cascade actions.
+
+\textbf{Centre Bonus (Placement Phase Only).}
+During the four-token placement phase (\texttt{\_turn\_count} $< 8$), each own token receives a bonus of $(7 - d_{\text{centre}}) \times 10$, rewarding central positions that maximise future reach.
+
+% ----------------------------------------------------------------
+\subsection{Conclusion}
+
+The agent's action selection combines iterative deepening alpha-beta search with a transposition table, killer move and history heuristic ordering, path-set cycle detection, and a six-term evaluation function. Together these components address the three main challenges of Cascade: tactical capture opportunities, positional stability, and avoidance of draw-by-repetition.
+
+% ================================================================
+\section{Performance Evaluation}
+\label{sec:performance}
+
+\subsection{Overview}
+
+The agent's performance was evaluated through direct match-play against three reference opponents of increasing strength: a random agent, a greedy one-ply agent, and an alpha-beta minimax reference agent at fixed depth~3 with no transposition table. For each opponent, 20~games were played from both RED and BLUE starting positions, and win, draw, and loss counts were recorded.
+
+% ----------------------------------------------------------------
+\subsection{Results}
+
+The agent consistently defeated the random and greedy agents across all tested matches, achieving the target win rate of 90\%+ from both starting colours. Against the depth-3 minimax reference agent, the final version achieved a win rate of approximately 85\%+ over repeated game samples, with losses being rare and draws almost entirely eliminated by the repetition-handling mechanisms.
+
+% ----------------------------------------------------------------
+\subsection{Identified Failure Modes}
+
+\textbf{Draw-by-Repetition.}
+In early versions, the agent frequently oscillated between positions, resulting in drawn games that should have been decisive wins. This was the dominant failure mode and directly motivated the path-set cycle detection and game history penalty mechanisms described in Section~\ref{sec:approach}.
+
+\textbf{Shallow Search Depth.}
+Before the \texttt{position\_history.copy()} performance fix (Section~\ref{sec:technical}), the agent could rarely exceed depth~4 within the time budget. After the fix, it reliably reached depth~8--10+ in the mid-game, substantially improving the quality of moves in critical positions.
+
+% ----------------------------------------------------------------
+\subsection{Conclusion}
+
+The combination of deeper search and robust repetition handling was the decisive factor in moving the agent from a draw-prone, shallow-searching player to one that wins the clear majority of games against the depth-3 minimax reference. Remaining losses are predominantly attributable to time-pressure situations in which the search terminates at a lower depth than usual.
+
+% ================================================================
+\section{Failed Trials}
+\label{sec:failed}
+
+\subsection{Overview}
+
+Two heuristic designs were trialled and discarded before arriving at the final evaluation function. Both failed to produce decisive play against minimax-based opponents, though each failure revealed a specific design principle that informed the next iteration.
+
+% ----------------------------------------------------------------
+\subsection{Trial 1: Simple Material and Stack Heuristic}
+
+\subsubsection{Design Rationale}
+
+During the early stages of development, a simple heuristic evaluation function was implemented to guide the adversarial search process. The objective was to provide a computationally efficient estimate of board quality while capturing the most fundamental aspects of gameplay in Cascade.
+
+The heuristic was based on two primary features:
+\begin{enumerate}[label=(\roman*), noitemsep]
+    \item material advantage, measured as the difference in total token counts, and
+    \item maximum stack height, representing the strength of the largest stack controlled by each player.
+\end{enumerate}
+
+The evaluation function can be expressed as:
+
+\begin{equation}
+h(s) = 10\,(T_{\text{self}} - T_{\text{opp}}) + 3\,(H^{\max}_{\text{self}} - H^{\max}_{\text{opp}})
+\end{equation}
+
+where $T$ denotes total tokens and $H^{\max}$ denotes the maximum stack height.
+
+\textbf{Material Advantage.}
+The difference in token count was given the highest weight, as the primary objective of Cascade is to eliminate the opponent's tokens. This follows standard practices in adversarial games, where material advantage is often the dominant factor in evaluation functions.
+
+\textbf{Stack Strength.}
+Maximum stack height was included to reward the formation of strong stacks. Taller stacks are advantageous because they can capture more opponent stacks and generate more impactful cascade actions.
+
+\subsubsection{Observed Behaviour}
+
+This heuristic enabled the agent to produce valid gameplay and demonstrated basic strategic competence. In particular, the agent was able to:
+
+\begin{itemize}[noitemsep]
+    \item maintain a material advantage in some situations,
+    \item prioritise capturing weaker opponent stacks, and
+    \item avoid illegal or trivial moves.
+\end{itemize}
+
+However, when tested against the reference agent, the performance was limited. The agent frequently failed to secure wins and often resulted in drawn games.
+
+\subsubsection{Identified Limitations}
+
+\textbf{Lack of Positional Awareness.}
+The heuristic did not account for spatial positioning on the board. As a result, the agent often placed or moved stacks near the edges, increasing the risk of being pushed off the board by cascade actions.
+
+\textbf{Absence of Tactical Evaluation.}
+The heuristic did not explicitly consider immediate tactical opportunities, such as potential captures or cascade chains. Consequently, the agent often failed to exploit strong offensive moves or defend against imminent threats.
+
+\textbf{Overemphasis on a Single Stack.}
+By focusing only on the maximum stack height, the heuristic ignored the distribution of stacks across the board. This sometimes led to overvaluing a single large stack while neglecting overall board control.
+
+\textbf{Repetition and Cyclic Behaviour.}
+The heuristic did not penalise repeated positions, causing the agent to enter loops of reversible moves. This frequently resulted in drawn games instead of decisive outcomes.
+
+\subsubsection{Conclusion}
+
+While the initial heuristic provided a useful baseline and enabled the successful application of minimax search, it was insufficient for strong gameplay performance. Its simplicity limited the agent's ability to reason about positional strategy, dynamic threats, and long-term planning. These limitations motivated the development of a revised heuristic incorporating positional weighting, tactical threat analysis, and repetition penalties.
+
+% ----------------------------------------------------------------
+\subsection{Trial 2: Revised Heuristic with Tactical Penalty}
+
+\subsubsection{Design Rationale}
+
+After testing Trial~1, the heuristic was found to overvalue tall stacks and cascade potential while underestimating immediate tactical danger. This caused the agent to choose visually strong moves that left stacks vulnerable to capture or positional loss. The heuristic was revised to include:
+
+\begin{itemize}[noitemsep]
+    \item stronger penalties for stacks that could be eaten on the opponent's next turn,
+    \item a higher weighting for material advantage, and
+    \item a reduced reward for height unless it contributed to concrete tactical opportunities.
+\end{itemize}
+
+This made the agent less aggressive but more stable against minimax-based opponents.
+
+\subsubsection{Observed Behaviour}
+
+The revised agent showed improved resistance to immediate capture threats and was less prone to sacrificing material for positional gains that did not materialise. Against simple opponents, win rates improved. However, against minimax-based agents the agent continued to produce drawn games at a high rate.
+
+\subsubsection{Identified Limitations}
+
+\textbf{Non-functional Repetition Penalty.}
+The repetition penalty included in this heuristic was found to be structurally broken. The root cause is that \texttt{GameState.copy()} resets \texttt{position\_history} to an empty dictionary (\texttt{new.position\_history = \{\}}). This means that inside the minimax search tree, every copied state has no memory of prior positions. The repetition penalty therefore evaluates to zero at every search node, and the agent continues to choose safe, reversible moves without penalty.
+
+\textbf{Incomplete Board Hash.}
+The board hash used for repetition detection did not include the current player's turn colour. In Cascade, a repeated position is only a true repetition if the same board state occurs with the same player to move. Omitting the turn colour caused the hash to conflate positions that are strategically distinct, further undermining the reliability of any repetition-based penalty.
+
+\subsubsection{Conclusion}
+
+Trial~2 correctly identified the need for repetition penalties but failed to implement them effectively due to two structural issues: the loss of position history during state copying and the incomplete board hash definition. These findings directly motivated the final design, in which repetition handling is separated from the heuristic and implemented at the search level via \texttt{path\_set} cycle detection and the read-only \texttt{game\_history} penalty --- both of which are immune to the state-copy issue because they do not rely on copied state objects.
+
+% ================================================================
+\section{Other Technical Aspects}
+\label{sec:technical}
+
+\subsection{Overview}
+
+Several algorithmic and data-structure optimisations were implemented to maximise the agent's search depth within the per-move time budget. These improvements operate below the level of the search algorithm and evaluation function but have a significant effect on practical performance.
+
+% ----------------------------------------------------------------
+\subsection{State Representation}
+
+\textbf{Flat Board Array.}
+\texttt{GameState} stores the board as a flat \texttt{list[64]} rather than a nested 2D array. This makes \texttt{state.copy()} a single list slice (\texttt{board[:]}) --- one of the most performance-critical operations, as a copy is made for every node in the search tree.
+
+\textbf{Incremental Token Counts.}
+\texttt{red\_tokens} and \texttt{blue\_tokens} are updated incrementally every time a cell is written via \texttt{set()}. Terminal detection and the material advantage term in the heuristic therefore require no board scan --- they execute in $O(1)$.
+
+\textbf{Lazy Board Hash.}
+\texttt{board\_hash()} uses a dirty flag (\texttt{\_hash\_dirty}). The hash is recomputed only when the board has changed since the last call; multiple calls on an unchanged state return the cached result. The hash is a tuple of \texttt{(cell\_index, color, height)} for all occupied cells, directly usable as a dictionary key in the TT and \texttt{path\_set}.
+
+% ----------------------------------------------------------------
+\subsection{Precomputed Lookup Tables}
+
+\textbf{Adjacency Table.}
+\texttt{\_ADJ[r][c][direction]} is a module-level table containing the \texttt{(nr, nc)} neighbour of every cell in every direction, or \texttt{None} if out of bounds. This eliminates repeated bounds-checking arithmetic in move generation, heuristic evaluation, and move ordering --- all of which iterate over neighbours in their innermost loops.
+
+\textbf{Centre Distance Table.}
+\texttt{\_CENTRE\_DIST[r * 8 + c]} precomputes the Manhattan distance from the board centre $(3.5,\,3.5)$ for all 64~cells. This is used in the placement heuristic and move ordering without any arithmetic at runtime.
+
+% ----------------------------------------------------------------
+\subsection{Iterative Deepening Re-ordering}
+
+After each completed depth, the best move found is placed at the front of the move list for the next iteration. This implements a lightweight form of principal variation re-ordering without maintaining a full PV table. The best move is then tried first at the next depth, maximising its contribution to alpha-beta pruning.
+
+% ----------------------------------------------------------------
+\subsection{Conclusion}
+
+The combination of a flat board representation, incremental token counts, a lazy hash, and precomputed adjacency and distance tables substantially reduces per-node overhead. These optimisations were the primary enabler of the deeper search depths that distinguish the final agent's performance from earlier versions.
+
+% ================================================================
+\section{Supporting Work}
+\label{sec:supporting}
+
+\subsection{Overview}
+
+Development of the agent was supported by systematic match-play testing against agents of varying strength, and by computational complexity analysis to identify and address performance bottlenecks. Both activities provided direct evidence of failure modes and guided each iterative improvement.
+
+% ----------------------------------------------------------------
+\subsection{Testing Methodology}
+
+The agent was tested progressively against three opponents:
+
+\begin{itemize}[noitemsep]
+    \item a \textbf{random agent}, to verify basic correctness of move generation and search,
+    \item a \textbf{greedy one-ply agent}, to verify that the search was exploiting simple tactical opportunities, and
+    \item the \textbf{minimax reference agent} at fixed depth~3, as the primary benchmark for final performance.
+\end{itemize}
+
+Match results were observed to identify specific failure modes. The two most impactful findings --- draw-by-repetition dominance and the \texttt{position\_history.copy()} allocation bottleneck --- were discovered through this testing process and directly produced the path-set cycle detection and game history penalty mechanisms.
+
+% ----------------------------------------------------------------
+\subsection{Complexity Analysis}
+
+Big-$O$ analysis was used alongside testing to identify the most time-consuming operations in the search loop. This analysis pointed to per-node memory allocation (specifically \texttt{position\_history.copy()}) as the dominant overhead, and informed the decision to use the read-only \texttt{game\_history} parameter pattern instead. The time budget per move was calibrated based on an estimate of expected move count across a full game (approximately 150~play turns), dividing the 180-second total budget accordingly.
+
+% ----------------------------------------------------------------
+\subsection{Iterative Comparison}
+
+Intermediate agent versions were compared by running back-to-back match series and observing win/draw/loss distributions. Individual changes --- heuristic weight adjustments, transposition table integration, move ordering additions --- were each evaluated in isolation before being committed to the final version, ensuring that improvements were additive and regressions were caught early.
+
+% ----------------------------------------------------------------
+\subsection{Conclusion}
+
+Direct match-play testing against a range of opponents, combined with complexity analysis, was the primary tool for diagnosing weaknesses and validating improvements. This approach enabled targeted, evidence-driven development and was more informative than static code analysis alone, as several key failure modes only became apparent through observed game behaviour.
+
+% ================================================================
+\end{document}

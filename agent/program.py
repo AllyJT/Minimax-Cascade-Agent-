@@ -2,10 +2,9 @@
 # Project Part B: Game Playing Agent
 
 
-from referee.game import PlayerColor,  Coord, Direction, \
-    Action, PlaceAction, MoveAction, EatAction, CascadeAction
+from referee.game import PlayerColor, Action
 from .game_algorithm import get_best_move
-from .state import GameState, get_legal_moves
+from .state import GameState
 
 
 class Agent:
@@ -41,14 +40,6 @@ class Agent:
 
         return get_best_move(self._state, self._color, referee.get("time_remaining"))
 
-    def board_hash(self):
-        """Simple hash of current board state"""
-        result = []
-        for r in range(8):
-            for c in range(8):
-                if self.board[r][c]:
-                    result.append((r, c, self.board[r][c][0], self.board[r][c][1]))
-        return tuple(result)
     def update(self, color: PlayerColor, action: Action, **referee: dict):
         """
         This method is called by the referee after a player has taken their

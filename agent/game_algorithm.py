@@ -20,11 +20,11 @@ _CENTRE_DIST = [
 
 # ---------------------------------------------------------------------------
 # Heuristic
+# The heuristic function that evaluates using 
+# a combination of color, height, edge distance, and tactical threats.
 # ---------------------------------------------------------------------------
 
 def heuristic(state: GameState, my_color: PlayerColor, is_placement: bool = False) -> float:
-    opponent = PlayerColor.BLUE if my_color == PlayerColor.RED else PlayerColor.RED
-
     my_tokens  = state.red_tokens  if my_color == PlayerColor.RED  else state.blue_tokens
     opp_tokens = state.blue_tokens if my_color == PlayerColor.RED  else state.red_tokens
 
@@ -54,7 +54,8 @@ def heuristic(state: GameState, my_color: PlayerColor, is_placement: bool = Fals
             edge_pen  = max(0, 2 - edge_dist) * height
 
             if is_mine:
-                my_height_sq += height * height
+                # squared: cascade power grows super-linearly with height
+                my_height_sq += height * height  
                 my_edge_pen  += edge_pen
                 if is_placement:
                     # Strong centre reward during placement
@@ -118,10 +119,12 @@ class MoveOrderer:
         self.killer_moves: dict[int, list] = {}
         # history[move_key] = count of cutoffs this move caused
         self.history: dict = {}
-
+    
+    # Get killer moves for this depth, or empty list if none recorded
     def get_killers(self, depth: int):
         return self.killer_moves.get(depth, [])
-
+    
+    # Record a killer move that caused a cutoff at this depth
     def record_killer(self, depth: int, move):
         killers = self.killer_moves.setdefault(depth, [])
         if move not in killers:
@@ -129,22 +132,27 @@ class MoveOrderer:
             if len(killers) > 2:
                 killers.pop()
 
+    # Record a killer move for the history heuristic
+    # the score grows exponentially with depth to prioritise cutoffs caused deeper in the tree
     def record_history(self, move, depth: int):
         key = self._move_key(move)
         self.history[key] = self.history.get(key, 0) + (2 ** depth)
 
+    # Convert a move to a hashable key for heuristic scoring
     def _move_key(self, move):
         return str(move)
 
+    # Order the move based on the killer moves, history heuristic, and static priority
     def order_moves(self, moves, state: GameState, my_color: PlayerColor, depth: int):
         opponent = PlayerColor.BLUE if my_color == PlayerColor.RED else PlayerColor.RED
         killers  = self.get_killers(depth)
 
+        # Prioritise moves with the order of 
+        # 1. Winning move (captures last token)
+        # 2. Killer moves from this depth
+        # 3. History heuristic score
+        # 4. Static: eat > cascade > move
         def priority(move):
-            # 1. Winning move (captures last token)
-            # 2. Killer moves from this depth
-            # 3. History heuristic score
-            # 4. Static: eat > cascade > move
 
             if move in killers:
                 return -9000 + killers.index(move)
@@ -196,6 +204,8 @@ class MoveOrderer:
 
 # ---------------------------------------------------------------------------
 # Alpha-beta minimax with transposition table
+# The alpha-beta search is implemented with a time guard that raises 
+# TimeoutError when the deadline is exceeded.
 # ---------------------------------------------------------------------------
 
 def minimax(
@@ -265,6 +275,7 @@ def minimax(
     if path_set is not None:
         path_set.add(h)
 
+    #  --- Explore moves in order using minimax and alpha-beta pruning ---
     for move in moves:
         new_state = state.copy()
         new_state.apply_action(move)
@@ -314,11 +325,13 @@ def minimax(
 
 # ---------------------------------------------------------------------------
 # Iterative deepening with time guard
+
+# Return the best move for the current player
+# using iterative deepening with alpha-beta and a transposition table
 # ---------------------------------------------------------------------------
 
 _TIME_SAFETY_MARGIN = 0.05
 _MAX_TIME_PER_MOVE  = 2.0
-
 
 def get_best_move(
     state: GameState,
@@ -331,11 +344,12 @@ def get_best_move(
     if not moves:
         return None
 
-    if tt      is None: tt      = {}
+    if tt is None: tt = {}
     if orderer is None: orderer = MoveOrderer()
 
     # --- Time budget ---
     if time_remaining is not None:
+        # assumes ~100 moves per game to budget time equally
         budget = min(time_remaining / 100, _MAX_TIME_PER_MOVE)
         budget = max(budget - _TIME_SAFETY_MARGIN, 0.05)
     else:
@@ -347,14 +361,14 @@ def get_best_move(
 
     # Actual game position history — passed into search to penalise revisiting real positions
     game_history = state.position_history
-    # Positions that have appeared twice in the actual game — a third visit draws
+    # Three repeat will trigger draw so warning when repeate twice already
     seen_twice = {h for h, c in game_history.items() if c >= 2}
     # Seed the search path with the current game position so cycles back to it are detected
     game_hash = state.board_hash()
 
     # --- Iterative deepening (all phases) ---
-    ordered    = orderer.order_moves(moves, state, my_color, 0)
-    best_move  = ordered[0]
+    ordered = orderer.order_moves(moves, state, my_color, 0)
+    best_move = ordered[0]
     best_score = float('-inf')
 
     # Depth-0 baseline — always available before timeout can fire
@@ -397,9 +411,9 @@ def get_best_move(
                     )
                 if score > candidate_score:
                     candidate_score = score
-                    candidate_move  = move
+                    candidate_move = move
 
-            best_move  = candidate_move
+            best_move = candidate_move
             best_score = candidate_score
             # Re-order: put best move first (killer move seed for next depth)
             ordered = [best_move] + [m for m in ordered if m != best_move]
@@ -409,28 +423,3 @@ def get_best_move(
 
     return best_move
 
-
-# ---------------------------------------------------------------------------
-# Agent
-# ---------------------------------------------------------------------------
-
-class Agent:
-    def __init__(self, color: PlayerColor, **referee: dict):
-        self._color   = color
-        self._state   = GameState()
-        self._tt      = {}         # transposition table — persists across turns
-        self._orderer = MoveOrderer()  # killer/history tables — persists across turns
-
-    def action(self, **referee: dict) -> Action:
-        time_remaining = referee.get("time_remaining", None)
-        return get_best_move(
-            self._state,
-         
-            self._color,
-            time_remaining=time_remaining,
-            tt=self._tt,
-            orderer=self._orderer,
-        )
-
-    def update(self, color: PlayerColor, action: Action, **referee: dict):
-        self._state.apply_action(action)

@@ -1,7 +1,7 @@
-\documentclass[10pt,a4paper]{article}
+\documentclass[10.5pt,a4paper]{article}
 
 % Packages
-\usepackage[a4paper, margin=2.5cm]{geometry}
+\usepackage[a4paper, margin=2cm]{geometry}
 \usepackage{amsmath}
 \usepackage{amssymb}
 \usepackage{parskip}
@@ -16,22 +16,25 @@
 \usepackage{url}
 
 % Section formatting
-\titleformat{\section}{\large\bfseries}{\thesection.}{0.5em}{}
-\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection}{0.5em}{}
-\titleformat{\subsubsection}{\normalsize\itshape}{\thesubsubsection}{0.5em}{}
+% \titleformat{\section}{\large\bfseries}{\thesection.}{0.5em}{}
+% \titleformat{\subsection}{\normalsize\bfseries}{\thesubsection}{0.5em}{}
+% \titleformat{\subsubsection}{\normalsize\itshape}{\thesubsubsection}{0.5em}{}
+\titlespacing*{\section}{0pt}{1.0ex}{0.5ex}
+\titlespacing*{\subsection}{0pt}{0.8ex}{0.3ex}
+\titlespacing*{\subsubsection}{0pt}{0.6ex}{0.2ex}
 
 % Header / footer
 \setlength{\headheight}{15pt}
 \pagestyle{fancy}
 \fancyhf{}
-\rhead{COMP30024 – Project Part B}
+\rhead{COMP30024 -- Project Part B}
 \lhead{Water Bottle}
 \rfoot{\thepage}
 
 % Spacing
-\setlength{\parskip}{4pt}
+\setlength{\parskip}{2pt}
 \setlength{\parindent}{0pt}
-\singlespacing
+\setstretch{0.97}
 
 % Hyperlink styling
 \hypersetup{
@@ -45,19 +48,19 @@
 
 % ---- Title block -----------------------------------------------
 \begin{center}
-    {\large The University of Melbourne}\\[0.4em]
-    {\large COMP30024 -- Artificial Intelligence}\\[0.2em]
-    {\large Project Part B: Game Playing Agent}\\[1em]
+    {\large The University of Melbourne}\\[0.15em]
+    {\large COMP30024 -- Artificial Intelligence}\\[0.1em]
+    {\large Project Part B: Game Playing Agent}\\[0.9em]
     {\LARGE\bfseries Playing Cascade Using Minimax}\\[1em]
     {\normalsize Water Bottle}\\[0.3em]
-    {\normalsize Phuong Trang Tran -- 1409465 }\\[0.3em]
+    {\normalsize Phuong Trang Tran -- 1409465}\\[0.3em]
     {\normalsize Ha Linh Nguyen -- 1482069}\\[0.3em]
     {\normalsize \today}
 \end{center}
 
-\vspace{1em}
+\vspace{0.3em}
 \hrule
-\vspace{1em}
+\vspace{0.3em}
 
 % ---- Overview --------------------------------------------------
 \section*{Overview}
@@ -70,7 +73,7 @@ This report describes the design and implementation of a game-playing agent for 
 
 \subsection{Overview}
 
-The agent selects actions using \textbf{iterative deepening alpha-beta minimax} as its core search strategy. On every turn, the algorithm performs successive full-depth searches from depth~1 up to a maximum of~12, subject to a per-move time budget of 2.0~seconds. The search is guided by a multi-feature evaluation function, a transposition table, and a move ordering system. Two dedicated mechanisms handle draw-by-repetition, which was identified as the dominant failure mode in earlier versions.
+The agent selects actions using iterative deepening alpha-beta minimax as its core search strategy. On every turn, the algorithm performs successive full-depth searches from depth~1 up to a maximum of~12, subject to a per-move time budget of 2.0~seconds. The search is guided by a multi-feature evaluation function, a transposition table, and a move ordering system. Two dedicated mechanisms handle draw-by-repetition, which was identified as the dominant failure mode in earlier versions.
 
 % ----------------------------------------------------------------
 \subsection{Search Algorithm}
@@ -79,7 +82,7 @@ The agent selects actions using \textbf{iterative deepening alpha-beta minimax} 
 At each turn, the agent runs alpha-beta minimax at depth~1, then depth~2, and so on, until the time budget is exhausted. If a \texttt{TimeoutError} is raised mid-depth, the result from the last fully completed depth is committed. This ensures the agent always returns a well-reasoned move even under time pressure, while naturally using as much of the available time as possible.
 
 \textbf{Alpha-Beta Pruning.}
-Alpha-beta pruning is applied throughout the search tree. When a beta-cutoff occurs --- a move is proven too good for the maximising player, so the minimising player would avoid the subtree --- the remaining moves at that node are skipped. For well-ordered move lists, this reduces the effective branching factor to approximately the square root of the full tree, allowing the agent to search roughly twice as deep as plain minimax in the same time.
+Alpha-beta pruning is applied throughout the search tree. When a beta-cutoff occurs --- a move is proven too good for the maximising player, so the minimising player would avoid the subtree --- the remaining moves at that node are skipped. For well-ordered move lists, this reduces the effective branching factor to approximately the square root of the full tree, allowing the agent to search significantly deeper than plain minimax within the same time limit.
 
 \textbf{Transposition Table.}
 A transposition table (TT) is maintained across the entire game, not just a single turn, so search results from earlier turns can benefit later ones. Each entry stores a score, a bound type, and the depth at which it was computed:
@@ -116,6 +119,8 @@ Within each node, moves are additionally ordered by static type before killer an
 
 % ----------------------------------------------------------------
 \subsection{Repetition and Cycle Handling}
+
+Because Cascade contains many reversible movement patterns, minimax agents can easily fall into repeated board states unless repetition handling is explicitly considered. Early versions of the agent frequently produced drawn games by oscillating between safe positions instead of committing to stronger long-term plans.
 
 \textbf{Path-Set Cycle Detection.}
 A mutable set of board hashes (\texttt{path\_set}) is threaded through every level of the minimax recursion. Before expanding a node, the algorithm checks whether the current board hash is already in the set --- if so, the line leads to a draw by repetition and is scored~0. The hash is added before recursing and removed (\texttt{discard}) after, maintaining the invariant that the set contains exactly the positions on the current search path.
@@ -240,6 +245,7 @@ The agent produced legal, coherent play and won reliably against random opponent
     \item \textbf{No positional awareness}: stacks were regularly placed on edges, where they were vulnerable to cascade push-off.
     \item \textbf{No tactical signals}: immediate eat threats and cascade opportunities were not rewarded.
     \item \textbf{No repetition penalty}: the agent entered oscillation loops against stronger opponents.
+    \item This trial showed that material advantage alone is not sufficient in Cascade. Positional safety and future cascade potential were often more important than immediate token count, particularly against stronger minimax-based opponents.
     \item \textbf{Fixed depth, no move ordering}: alpha-beta pruning was inefficient; search depth could not adapt to available time.
 \end{itemize}
 
@@ -303,7 +309,7 @@ Several algorithmic and data-structure optimisations were implemented to maximis
 \subsection{State Representation}
 
 \textbf{Flat Board Array.}
-\texttt{GameState} stores the board as a flat \texttt{list[64]} rather than a nested 2D array. This makes \texttt{state.copy()} a single list slice (\texttt{board[:]}), one of the most performance-critical operations, as a copy is made for every node in the search tree.
+\texttt{GameState} stores the board as a flat \texttt{list[64]} rather than a nested 2D array. This makes \texttt{state.copy()} a single list slice (\texttt{board[:]}) , one of the most performance-critical operations, as a copy is made for every node in the search tree.
 
 \textbf{Incremental Token Counts.}
 \texttt{red\_tokens} and \texttt{blue\_tokens} are updated incrementally every time a cell is written via \texttt{set()}. Terminal detection and the material advantage term in the heuristic therefore require no board scan and so they execute in $O(1)$.
@@ -328,7 +334,14 @@ After each completed depth, the best move found is placed at the front of the mo
 % ----------------------------------------------------------------
 \subsection{Conclusion}
 
-The combination of a flat board representation, incremental token counts, a lazy hash, and precomputed adjacency and distance tables substantially reduces per-node overhead. These optimisations were the primary enabler of the deeper search depths that distinguish the final agent's performance from earlier versions.
+The combination of a flat board representation, incremental token counts, a lazy hash, and precomputed adjacency and distance tables significantly reduces the amount of work performed at each search node. These optimisations were the primary enabler of the deeper search depths that distinguish the final agent's performance from earlier versions.
+
+% ================================================================
+\section{Use of AI Tools}
+
+Claude (Anthropic, 2026) and ChatGPT (OpenAI, 2026) were used as supplementary tools during development of this project. These tools were mainly used for report formatting, debugging assistance, clarification of technical concepts, and improving the readability of explanations.
+
+AI-generated suggestions were reviewed, modified, and verified by the authors before inclusion in the final submission. All implementation decisions, testing, evaluation, and final code were completed by the authors.
 
 % ================================================================
 \section{Supporting Work}
@@ -344,9 +357,9 @@ Development of the agent was supported by systematic match-play testing against 
 The agent was tested progressively against three opponents:
 
 \begin{itemize}[noitemsep]
-    \item a \textbf{random agent}, to verify basic correctness of move generation and search,
-    \item a \textbf{greedy one-ply agent}, to verify that the search was exploiting simple tactical opportunities, and
-    \item the \textbf{minimax reference agent} at fixed depth~3, as the primary benchmark for final performance.
+    \item a random agent, to verify basic correctness of move generation and search,
+    \item a greedy one-ply agent, to verify that the search was exploiting simple tactical opportunities, and
+    \item the minimax reference agent at fixed depth~3, as the primary benchmark for final performance.
 \end{itemize}
 
 Match results were observed to identify specific failure modes. The two most impactful findings, draw-by-repetition dominance and the \texttt{position\_history.copy()} allocation bottleneck, were discovered through this testing process and directly produced the path-set cycle detection and game history penalty mechanisms.
@@ -394,7 +407,7 @@ Anthropic. (2026).
 
 \bibitem{chatgpt}
 OpenAI. (2026).
-\textit{ChatGPT} [Large language model].
+\textit{ChatGPT} (May 2026 version) [Large language model].
 \url{https://chat.openai.com}
 
 \end{thebibliography}

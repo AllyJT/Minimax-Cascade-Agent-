@@ -1,4 +1,4 @@
-\documentclass[12pt,a4paper]{article}
+\documentclass[10pt,a4paper]{article}
 
 % Packages
 \usepackage[a4paper, margin=2.5cm]{geometry}
@@ -13,6 +13,7 @@
 \usepackage{microtype}
 \usepackage{fancyhdr}
 \usepackage{graphicx}
+\usepackage{url}
 
 % Section formatting
 \titleformat{\section}{\large\bfseries}{\thesection.}{0.5em}{}
@@ -20,6 +21,7 @@
 \titleformat{\subsubsection}{\normalsize\itshape}{\thesubsubsection}{0.5em}{}
 
 % Header / footer
+\setlength{\headheight}{15pt}
 \pagestyle{fancy}
 \fancyhf{}
 \rhead{COMP30024 – Project Part B}
@@ -27,9 +29,9 @@
 \rfoot{\thepage}
 
 % Spacing
-\setlength{\parskip}{6pt}
+\setlength{\parskip}{4pt}
 \setlength{\parindent}{0pt}
-\onehalfspacing
+\singlespacing
 
 % Hyperlink styling
 \hypersetup{
@@ -67,8 +69,6 @@
 \section*{Overview}
 
 This report describes the design and implementation of a game-playing agent for Cascade, a two-player adversarial board game. The agent is built on iterative deepening alpha-beta minimax with a multi-feature evaluation function, a transposition table, and dedicated mechanisms for handling draw-by-repetition. The report is structured as follows: Section~\ref{sec:approach} describes the final agent's action selection approach; Section~\ref{sec:performance} evaluates its performance; Section~\ref{sec:failed} documents failed heuristic trials that motivated the final design; Section~\ref{sec:technical} covers technical optimisations; and Section~\ref{sec:supporting} describes supporting development work.
-
-\newpage
 
 % ================================================================
 \section{Approach: Action Selection}
@@ -203,95 +203,81 @@ The combination of deeper search and robust repetition handling was the decisive
 
 \subsection{Overview}
 
-Two heuristic designs were trialled and discarded before arriving at the final evaluation function. Both failed to produce decisive play against minimax-based opponents, though each failure revealed a specific design principle that informed the next iteration.
+Three agent designs were trialled and discarded before arriving at the final evaluation function. Each failed to produce decisive play against minimax-based opponents, though each failure revealed a specific design principle that informed the next iteration.
 
 % ----------------------------------------------------------------
-\subsection{Trial 1: Simple Material and Stack Heuristic}
+\subsection{Trial 1: Starting Agent --- Pure Token-Difference Minimax}
 
 \subsubsection{Design Rationale}
 
-During the early stages of development, a simple heuristic evaluation function was implemented to guide the adversarial search process. The objective was to provide a computationally efficient estimate of board quality while capturing the most fundamental aspects of gameplay in Cascade.
-
-The heuristic was based on two primary features:
-\begin{enumerate}[label=(\roman*), noitemsep]
-    \item material advantage, measured as the difference in total token counts, and
-    \item maximum stack height, representing the strength of the largest stack controlled by each player.
-\end{enumerate}
-
-The evaluation function can be expressed as:
+The first implementation was a minimal alpha-beta minimax agent built to establish a working baseline. The evaluation function was a single-term token difference:
 
 \begin{equation}
-h(s) = 10\,(T_{\text{self}} - T_{\text{opp}}) + 3\,(H^{\max}_{\text{self}} - H^{\max}_{\text{opp}})
+h(s) = T_{\text{self}} - T_{\text{opp}}
 \end{equation}
 
-where $T$ denotes total tokens and $H^{\max}$ denotes the maximum stack height.
-
-\textbf{Material Advantage.}
-The difference in token count was given the highest weight, as the primary objective of Cascade is to eliminate the opponent's tokens. This follows standard practices in adversarial games, where material advantage is often the dominant factor in evaluation functions.
-
-\textbf{Stack Strength.}
-Maximum stack height was included to reward the formation of strong stacks. Taller stacks are advantageous because they can capture more opponent stacks and generate more impactful cascade actions.
+No weights, positional terms, or tactical features were included. The search ran at fixed depth~3 with no move ordering, and the board was stored as a nested 8$\times$8 list copied with \texttt{copy.deepcopy} at every node.
 
 \subsubsection{Observed Behaviour}
 
-This heuristic enabled the agent to produce valid gameplay and demonstrated basic strategic competence. In particular, the agent was able to:
-
-\begin{itemize}[noitemsep]
-    \item maintain a material advantage in some situations,
-    \item prioritise capturing weaker opponent stacks, and
-    \item avoid illegal or trivial moves.
-\end{itemize}
-
-However, when tested against the reference agent, the performance was limited. The agent frequently failed to secure wins and often resulted in drawn games.
+The agent produced legal, coherent play and won reliably against random opponents. Against the greedy and depth-3 minimax reference agents it drew or lost frequently.
 
 \subsubsection{Identified Limitations}
 
-\textbf{Lack of Positional Awareness.}
-The heuristic did not account for spatial positioning on the board. As a result, the agent often placed or moved stacks near the edges, increasing the risk of being pushed off the board by cascade actions.
-
-\textbf{Absence of Tactical Evaluation.}
-The heuristic did not explicitly consider immediate tactical opportunities, such as potential captures or cascade chains. Consequently, the agent often failed to exploit strong offensive moves or defend against imminent threats.
-
-\textbf{Overemphasis on a Single Stack.}
-By focusing only on the maximum stack height, the heuristic ignored the distribution of stacks across the board. This sometimes led to overvaluing a single large stack while neglecting overall board control.
-
-\textbf{Repetition and Cyclic Behaviour.}
-The heuristic did not penalise repeated positions, causing the agent to enter loops of reversible moves. This frequently resulted in drawn games instead of decisive outcomes.
-
-\subsubsection{Conclusion}
-
-While the initial heuristic provided a useful baseline and enabled the successful application of minimax search, it was insufficient for strong gameplay performance. Its simplicity limited the agent's ability to reason about positional strategy, dynamic threats, and long-term planning. These limitations motivated the development of a revised heuristic incorporating positional weighting, tactical threat analysis, and repetition penalties.
+\begin{itemize}[noitemsep]
+    \item \textbf{No positional awareness}: stacks were regularly placed on edges, where they were vulnerable to cascade push-off.
+    \item \textbf{No tactical signals}: immediate eat threats and cascade opportunities were not rewarded.
+    \item \textbf{No repetition penalty}: the agent entered oscillation loops against stronger opponents.
+    \item \textbf{Fixed depth, no move ordering}: alpha-beta pruning was inefficient; search depth could not adapt to available time.
+\end{itemize}
 
 % ----------------------------------------------------------------
 \subsection{Trial 2: Revised Heuristic with Tactical Penalty}
 
 \subsubsection{Design Rationale}
 
-After testing Trial~1, the heuristic was found to overvalue tall stacks and cascade potential while underestimating immediate tactical danger. This caused the agent to choose visually strong moves that left stacks vulnerable to capture or positional loss. The heuristic was revised to include:
-
-\begin{itemize}[noitemsep]
-    \item stronger penalties for stacks that could be eaten on the opponent's next turn,
-    \item a higher weighting for material advantage, and
-    \item a reduced reward for height unless it contributed to concrete tactical opportunities.
-\end{itemize}
-
-This made the agent less aggressive but more stable against minimax-based opponents.
+After testing Trial~1, the heuristic was revised to penalise stacks vulnerable to immediate capture, increase the material weight, and reduce the height reward unless it contributed to concrete tactical opportunities. This made the agent more stable but less aggressive against minimax-based opponents.
 
 \subsubsection{Observed Behaviour}
 
-The revised agent showed improved resistance to immediate capture threats and was less prone to sacrificing material for positional gains that did not materialise. Against simple opponents, win rates improved. However, against minimax-based agents the agent continued to produce drawn games at a high rate.
+The revised agent showed improved resistance to immediate capture threats and won more consistently against simple opponents. Against minimax-based agents the draw rate remained high.
 
 \subsubsection{Identified Limitations}
 
 \textbf{Non-functional Repetition Penalty.}
-The repetition penalty included in this heuristic was found to be structurally broken. The root cause is that \texttt{GameState.copy()} resets \texttt{position\_history} to an empty dictionary (\texttt{new.position\_history = \{\}}). This means that inside the minimax search tree, every copied state has no memory of prior positions. The repetition penalty therefore evaluates to zero at every search node, and the agent continues to choose safe, reversible moves without penalty.
+The repetition penalty was structurally broken: \texttt{GameState.copy()} resets \texttt{position\_history} to an empty dictionary, so every search node has no memory of prior positions. The penalty evaluated to zero throughout the tree.
 
 \textbf{Incomplete Board Hash.}
-The board hash used for repetition detection did not include the current player's turn colour. In Cascade, a repeated position is only a true repetition if the same board state occurs with the same player to move. Omitting the turn colour caused the hash to conflate positions that are strategically distinct, further undermining the reliability of any repetition-based penalty.
+The board hash omitted the current player's turn colour, conflating strategically distinct positions and further undermining the repetition penalty.
 
-\subsubsection{Conclusion}
+% ----------------------------------------------------------------
+\subsection{Trial 3: Intermediate Agent --- Expanded Heuristic with Static Move Ordering}
 
-Trial~2 correctly identified the need for repetition penalties but failed to implement them effectively due to two structural issues: the loss of position history during state copying and the incomplete board hash definition. These findings directly motivated the final design, in which repetition handling is separated from the heuristic and implemented at the search level via \texttt{path\_set} cycle detection and the read-only \texttt{game\_history} penalty --- both of which are immune to the state-copy issue because they do not rely on copied state objects.
+\subsubsection{Design Rationale}
+
+Building on Trials 1 and~2, a substantially revised agent was implemented as a direct predecessor to the final version. The evaluation function was extended to four terms:
+
+\begin{equation}
+h(s) = 50\,(T_{\text{self}} - T_{\text{opp}}) + w_c \sum_{\text{own}} (-d_{\text{centre}} \cdot h) + 20\,N_{\text{eat}} - 500\,R
+\end{equation}
+
+where $w_c = 25$ during placement and~$1$ otherwise, $N_{\text{eat}}$ counts own tokens immediately capturable adjacent to opponent stacks, and $R$ is the current-position visit count. A static move-ordering function (\texttt{EatAction} $>$ \texttt{CascadeAction} $>$ \texttt{MoveAction}) was added, and the search depth was made phase-adaptive (depth~1 during placement, depth~3 during play).
+
+\subsubsection{Observed Behaviour}
+
+The agent placed pieces centrally, prioritised eat actions, and won consistently against random and greedy opponents. Against the depth-3 minimax reference agent, drawn games remained frequent.
+
+\subsubsection{Identified Limitations}
+
+\begin{itemize}[noitemsep]
+    \item \textbf{Broken repetition penalty}: the same \texttt{GameState.copy()} issue as Trial~2; the penalty evaluated to zero at every search node.
+    \item \textbf{No iterative deepening}: fixed depths could not adapt to available time, risking timeout in complex positions.
+    \item \textbf{No transposition table}: identical positions reached via different move sequences were re-evaluated from scratch.
+    \item \textbf{\texttt{deepcopy} overhead}: the nested-list board made state copy the dominant runtime cost, capping practical search depth.
+    \item \textbf{Static move ordering}: fixed type-based priority did not learn from cutoffs; killer moves and history heuristic were absent.
+\end{itemize}
+
+Trial~3 directly motivated the key architectural changes in the final agent: iterative deepening with time management, a persistent transposition table, the \texttt{MoveOrderer} class with killer moves and history heuristic, path-set cycle detection, and a flat-array board representation.
 
 % ================================================================
 \section{Other Technical Aspects}
@@ -369,4 +355,37 @@ Intermediate agent versions were compared by running back-to-back match series a
 Direct match-play testing against a range of opponents, combined with complexity analysis, was the primary tool for diagnosing weaknesses and validating improvements. This approach enabled targeted, evidence-driven development and was more informative than static code analysis alone, as several key failure modes only became apparent through observed game behaviour.
 
 % ================================================================
+\newpage
+\begin{thebibliography}{9}
+
+\bibitem{geeksforgeeks}
+GeeksForGeeks.
+\textit{Minimax Algorithm in Game Theory | Set 1 (Introduction)}.
+Available at: \url{https://www.geeksforgeeks.org/dsa/minimax-algorithm-in-game-theory-set-1-introduction/}.
+Consulted for background reading on minimax and alpha-beta pruning formulation.
+
+\bibitem{tuankhoin}
+T.\ K.\ Hoin.
+\textit{AI-Project-B} (GitHub repository).
+Available at: \url{https://github.com/tuankhoin/AI-Project-B}.
+Consulted as a reference example of a prior COMP30024 Part~B submission for general structural inspiration.
+
+\bibitem{matomatical}
+M.\ Farrugia.
+\textit{AI-projectB} (GitHub repository).
+Available at: \url{https://github.com/matomatical/AI-projectB}.
+Consulted as a reference example of a prior COMP30024 Part~B submission for general structural inspiration.
+
+\bibitem{claude}
+Anthropic.
+\textit{Claude} (Large Language Model, claude.ai).
+Used as an AI coding assistant during development to help debug code, discuss algorithmic design decisions, and draft portions of this report. All algorithmic ideas and strategic decisions were conceived and verified by the team.
+
+\bibitem{chatgpt}
+OpenAI.
+\textit{ChatGPT} (Large Language Model, chat.openai.com).
+Used as an AI assistant to discuss and explore game-playing algorithmic concepts during the design phase.
+
+\end{thebibliography}
+
 \end{document}

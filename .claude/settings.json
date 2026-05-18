@@ -16,7 +16,10 @@
       "Bash(ls /mnt/ 2>&1)",
       "Read(//mnt/**)",
       "PowerShell(& \"C:\\\\Users\\\\tranp\\\\anaconda3\\\\python.exe\" -m pip install pymupdf -q 2>&1)",
-      "PowerShell(& \"C:\\\\Users\\\\tranp\\\\anaconda3\\\\python.exe\" -c \"import fitz; print\\(fitz.__version__\\)\")"
+      "PowerShell(& \"C:\\\\Users\\\\tranp\\\\anaconda3\\\\python.exe\" -c \"import fitz; print\\(fitz.__version__\\)\")",
+      "Bash(pandoc --version)",
+      "Bash(pdflatex -interaction=nonstopmode report.tex)",
+      "Bash(pandoc report.tex -o report.docx)"
     ]
   }
 }

@@ -1,3 +1,14 @@
 __pycache__/
 *.py[cod]
 *.pyo
+*.txt
+*.docx
+# LaTeX build artifacts
+*.aux
+*.log
+*.out
+*.toc
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.pdf

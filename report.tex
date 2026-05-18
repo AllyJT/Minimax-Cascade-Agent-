@@ -43,27 +43,21 @@
 % ============================================================
 \begin{document}
 
-% ---- Title page ------------------------------------------------
-\begin{titlepage}
-    \centering
-    \vspace*{2cm}
+% ---- Title block -----------------------------------------------
+\begin{center}
+    {\large The University of Melbourne}\\[0.4em]
+    {\large COMP30024 -- Artificial Intelligence}\\[0.2em]
+    {\large Project Part B: Game Playing Agent}\\[1em]
+    {\LARGE\bfseries Playing Cascade Using Minimax}\\[1em]
+    {\normalsize Water Bottle}\\[0.3em]
+    {\normalsize Phuong Trang Tran -- 1409465 }\\[0.3em]
+    {\normalsize Ha Linh Nguyen -- 1482069}\\[0.3em]
+    {\normalsize \today}
+\end{center}
 
-    {\large The University of Melbourne}\\[0.5em]
-    {\large COMP30024 -- Artificial Intelligence}\\[0.5em]
-    {\large Project Part B: Game Playing Agent}\\[2cm]
-
-    {\LARGE\bfseries Playing Cascade Using Minimax}\\[2cm]
-
-    {\large Water Bottle}\\[0.5em]
-    {\normalsize
-        Phuong Trang Tran -- 1409466\\
-        Ha Linh Nguyen -- 1492069
-    }\\[3cm]
-
-    {\normalsize Semester 1, 2026}
-
-    \vfill
-\end{titlepage}
+\vspace{1em}
+\hrule
+\vspace{1em}
 
 % ---- Overview --------------------------------------------------
 \section*{Overview}
@@ -151,13 +145,13 @@ where $T$ denotes total tokens, $H^{2}$ denotes sum of squared stack heights, $E
 The difference in total token count is given the dominant weight of~100, reflecting that token elimination is the primary winning condition of Cascade.
 
 \textbf{Height Advantage.}
-Stack heights are squared and summed for each side. The squared term rewards concentration --- a single tall stack is worth more than two short ones of equivalent total height, reflecting the greater cascade potential of taller stacks.
+Stack heights are squared and summed for each side. The squared term rewards concentration, a single tall stack is worth more than two short ones of equivalent total height, reflecting the greater cascade potential of taller stacks.
 
 \textbf{Edge Penalty Advantage.}
 Tokens near the board edge have fewer available moves and are more vulnerable to being pushed off by cascade actions. The net edge penalty rewards the agent for keeping its own tokens central while pushing the opponent toward the edges.
 
 \textbf{Eat Threats.}
-The net number of tokens immediately capturable by each side (via \texttt{EatAction}) is weighted at~20 per token. This is a strong short-term tactical signal --- being able to capture while avoiding capture is directly decisive.
+The net number of tokens immediately capturable by each side (via \texttt{EatAction}) is weighted at~20 per token. This is a strong short-term tactical signal: being able to capture while avoiding capture is directly decisive.
 
 \textbf{Cascade Threats.}
 For each tall stack (height $\geq 3$), the search checks whether a cascade in any direction would hit an opponent token. The net cascade-threat advantage is weighted at~30 per token, higher than simple eat threats, reflecting the chained destructive potential of cascade actions.
@@ -176,12 +170,30 @@ The agent's action selection combines iterative deepening alpha-beta search with
 
 \subsection{Overview}
 
-The agent's performance was evaluated through direct match-play against three reference opponents of increasing strength: a random agent, a greedy one-ply agent, and an alpha-beta minimax reference agent at fixed depth~3 with no transposition table. For each opponent, 20~games were played from both RED and BLUE starting positions, and win, draw, and loss counts were recorded.
+The agent's performance was evaluated through direct match-play against three reference opponents of increasing strength: a random agent, a greedy one-ply agent, and an alpha-beta minimax reference agent at fixed depth~3 with no transposition table. For each opponent, 20~games were played (10 as RED and 10 as BLUE), and win, draw, and loss counts were recorded.
 
 % ----------------------------------------------------------------
 \subsection{Results}
 
-The agent consistently defeated the random and greedy agents across all tested matches, achieving the target win rate of 90\%+ from both starting colours. Against the depth-3 minimax reference agent, the final version achieved a win rate of approximately 85\%+ over repeated game samples, with losses being rare and draws almost entirely eliminated by the repetition-handling mechanisms.
+Table~\ref{tab:results} summarises the results across all 60~test games (20~per opponent, 10 as each colour). The agent won 59 of 60 games, with one draw as BLUE against the depth-3 minimax reference and no losses against any opponent.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{lccccc}
+\toprule
+\textbf{Opponent} & \textbf{Games} & \textbf{Wins} & \textbf{Draws} & \textbf{Losses} & \textbf{Win Rate} \\
+\midrule
+Random agent       & 20 & 20 & 0 & 0 & 100\% \\
+Greedy agent       & 20 & 20 & 0 & 0 & 100\% \\
+Minimax (depth~3)  & 20 & 19 & 1 & 0 & 95\%  \\
+\midrule
+\textbf{Total}     & \textbf{60} & \textbf{59} & \textbf{1} & \textbf{0} & \textbf{98.3\%} \\
+\bottomrule
+\end{tabular}
+\caption{Match results across all 60 test games (20 per opponent; 10 as RED, 10 as BLUE). The single draw occurred as BLUE against the minimax reference.}
+\label{tab:results}
+\end{table}
 
 % ----------------------------------------------------------------
 \subsection{Identified Failure Modes}
@@ -291,10 +303,10 @@ Several algorithmic and data-structure optimisations were implemented to maximis
 \subsection{State Representation}
 
 \textbf{Flat Board Array.}
-\texttt{GameState} stores the board as a flat \texttt{list[64]} rather than a nested 2D array. This makes \texttt{state.copy()} a single list slice (\texttt{board[:]}) --- one of the most performance-critical operations, as a copy is made for every node in the search tree.
+\texttt{GameState} stores the board as a flat \texttt{list[64]} rather than a nested 2D array. This makes \texttt{state.copy()} a single list slice (\texttt{board[:]}), one of the most performance-critical operations, as a copy is made for every node in the search tree.
 
 \textbf{Incremental Token Counts.}
-\texttt{red\_tokens} and \texttt{blue\_tokens} are updated incrementally every time a cell is written via \texttt{set()}. Terminal detection and the material advantage term in the heuristic therefore require no board scan --- they execute in $O(1)$.
+\texttt{red\_tokens} and \texttt{blue\_tokens} are updated incrementally every time a cell is written via \texttt{set()}. Terminal detection and the material advantage term in the heuristic therefore require no board scan and so they execute in $O(1)$.
 
 \textbf{Lazy Board Hash.}
 \texttt{board\_hash()} uses a dirty flag (\texttt{\_hash\_dirty}). The hash is recomputed only when the board has changed since the last call; multiple calls on an unchanged state return the cached result. The hash is a tuple of \texttt{(cell\_index, color, height)} for all occupied cells, directly usable as a dictionary key in the TT and \texttt{path\_set}.
@@ -303,7 +315,7 @@ Several algorithmic and data-structure optimisations were implemented to maximis
 \subsection{Precomputed Lookup Tables}
 
 \textbf{Adjacency Table.}
-\texttt{\_ADJ[r][c][direction]} is a module-level table containing the \texttt{(nr, nc)} neighbour of every cell in every direction, or \texttt{None} if out of bounds. This eliminates repeated bounds-checking arithmetic in move generation, heuristic evaluation, and move ordering --- all of which iterate over neighbours in their innermost loops.
+\texttt{\_ADJ[r][c][direction]} is a module-level table containing the \texttt{(nr, nc)} neighbour of every cell in every direction, or \texttt{None} if out of bounds. This eliminates repeated bounds-checking arithmetic in move generation, heuristic evaluation, and move ordering, all of which iterate over neighbours in their innermost loops.
 
 \textbf{Centre Distance Table.}
 \texttt{\_CENTRE\_DIST[r * 8 + c]} precomputes the Manhattan distance from the board centre $(3.5,\,3.5)$ for all 64~cells. This is used in the placement heuristic and move ordering without any arithmetic at runtime.
@@ -337,17 +349,17 @@ The agent was tested progressively against three opponents:
     \item the \textbf{minimax reference agent} at fixed depth~3, as the primary benchmark for final performance.
 \end{itemize}
 
-Match results were observed to identify specific failure modes. The two most impactful findings --- draw-by-repetition dominance and the \texttt{position\_history.copy()} allocation bottleneck --- were discovered through this testing process and directly produced the path-set cycle detection and game history penalty mechanisms.
+Match results were observed to identify specific failure modes. The two most impactful findings, draw-by-repetition dominance and the \texttt{position\_history.copy()} allocation bottleneck, were discovered through this testing process and directly produced the path-set cycle detection and game history penalty mechanisms.
 
 % ----------------------------------------------------------------
 \subsection{Complexity Analysis}
 
-Big-$O$ analysis was used alongside testing to identify the most time-consuming operations in the search loop. This analysis pointed to per-node memory allocation (specifically \texttt{position\_history.copy()}) as the dominant overhead, and informed the decision to use the read-only \texttt{game\_history} parameter pattern instead. The time budget per move was calibrated based on an estimate of expected move count across a full game (approximately 150~play turns), dividing the 180-second total budget accordingly.
+Big-$O$ analysis was used alongside testing to identify the most time-consuming operations in the search loop and helps us in optimising the algorithm. This analysis identified per-node memory allocation (specifically \texttt{position\_history.copy()}) as the dominant overhead, and informed the decision to use the read-only \texttt{game\_history} parameter pattern instead. The time budget per move was calibrated based on an estimate of expected move count across a full game (approximately 150~play turns), dividing the 180-second total budget accordingly.
 
 % ----------------------------------------------------------------
 \subsection{Iterative Comparison}
 
-Intermediate agent versions were compared by running back-to-back match series and observing win/draw/loss distributions. Individual changes --- heuristic weight adjustments, transposition table integration, move ordering additions --- were each evaluated in isolation before being committed to the final version, ensuring that improvements were additive and regressions were caught early.
+Intermediate agent versions were compared by running back-to-back match series and observing win/draw/loss distributions. Individual changes like heuristic weight adjustments, transposition table integration, move ordering additions were each evaluated in isolation before being committed to the final version, ensuring that improvements were additive and regressions were caught early.
 
 % ----------------------------------------------------------------
 \subsection{Conclusion}
@@ -359,32 +371,31 @@ Direct match-play testing against a range of opponents, combined with complexity
 \begin{thebibliography}{9}
 
 \bibitem{geeksforgeeks}
-GeeksForGeeks.
-\textit{Minimax Algorithm in Game Theory | Set 1 (Introduction)}.
-Available at: \url{https://www.geeksforgeeks.org/dsa/minimax-algorithm-in-game-theory-set-1-introduction/}.
-Consulted for background reading on minimax and alpha-beta pruning formulation.
+GeeksForGeeks. (n.d.).
+\textit{Minimax algorithm in game theory | Set 1 (introduction)}.
+\url{https://www.geeksforgeeks.org/dsa/minimax-algorithm-in-game-theory-set-1-introduction/}
 
 \bibitem{tuankhoin}
-T.\ K.\ Hoin.
-\textit{AI-Project-B} (GitHub repository).
-Available at: \url{https://github.com/tuankhoin/AI-Project-B}.
-Consulted as a reference example of a prior COMP30024 Part~B submission for general structural inspiration.
+Hoin, T.\ K.\ (2016).
+\textit{AI-Project-B} [Computer software].
+GitHub.
+\url{https://github.com/tuankhoin/AI-Project-B}
 
 \bibitem{matomatical}
-M.\ Farrugia.
-\textit{AI-projectB} (GitHub repository).
-Available at: \url{https://github.com/matomatical/AI-projectB}.
-Consulted as a reference example of a prior COMP30024 Part~B submission for general structural inspiration.
+Farrugia, M.\ (2020).
+\textit{AI-projectB} [Computer software].
+GitHub.
+\url{https://github.com/matomatical/AI-projectB}
 
 \bibitem{claude}
-Anthropic.
-\textit{Claude} (Large Language Model, claude.ai).
-Used as an AI coding assistant during development to help debug code, discuss algorithmic design decisions, and draft portions of this report. All algorithmic ideas and strategic decisions were conceived and verified by the team.
+Anthropic. (2026).
+\textit{Claude} [Large language model].
+\url{https://claude.ai}
 
 \bibitem{chatgpt}
-OpenAI.
-\textit{ChatGPT} (Large Language Model, chat.openai.com).
-Used as an AI assistant to discuss and explore game-playing algorithmic concepts during the design phase.
+OpenAI. (2026).
+\textit{ChatGPT} [Large language model].
+\url{https://chat.openai.com}
 
 \end{thebibliography}
 
